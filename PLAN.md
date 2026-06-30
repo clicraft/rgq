@@ -23,7 +23,10 @@ spec are flagged with **⚠ DEVIATION**.
 | `rg` discovery | Resolve `rg` from `PATH`; allow override via `RGQ_RG` env var | Testability + clear error (§12) |
 | Concurrency | **v1 ships single-threaded**; clause-level parallelism is milestone 7 (optional) behind a flag/feature | Spec §11 says measure first; keep v1 small |
 | Term-frequency reordering | **Not in v1.** Preserve author's term order. | Spec §11 — optional optimization |
-| Batching | Compute a conservative per-batch byte budget from a configurable `ARG_MAX` (default probed, fallback 128 KiB of argv) | Spec §8.2 |
+| Batching | Per-batch budget from a probed `ARG_MAX` (fallback 128 KiB), **minus** current env size and per-arg overhead; always ≥1 path per batch | Spec §8.2 |
+| Term semantics | Terms are **regexes by default** (`rg` matches them); `-F` makes them literal. A malformed-regex term is surfaced as a clear per-term error, never auto-escaped | Spec §1/§3.2 |
+| Search root | Pass an explicit `.` to seed/universe calls; never invoke `rg` with zero path args (it scans cwd ambiguously — spike 1) | Spike |
+| no-ignore mapping | rgq `-u`/`--no-ignore` → rg `--no-ignore`; rgq `-uu` → rg `--no-ignore --hidden`. Emit explicit rg flags, don't forward the raw `-u` count | Spec §3.2 |
 
 ### `rg` invocation cheat-sheet (the only ripgrep modes we use)
 
@@ -35,6 +38,34 @@ spec are flagged with **⚠ DEVIATION**.
 
 `--null` (NUL-separated output) is mandatory everywhere (§2.2). `-e PATTERN` keeps a
 leading-dash pattern from being read as a flag; `--` separates paths (§8.3).
+
+**Two hard rules learned from the spike, both correctness-critical:**
+
+1. **Never invoke `rg` with zero path arguments during narrowing.** With no paths, `rg`
+   silently scans the whole cwd. So: if the candidate set is empty, short-circuit the
+   clause to ∅ — do **not** spawn `rg`. Batching must likewise never emit an empty batch.
+2. **Derive the result set from parsed stdout, not the exit code.** Exit codes are
+   inconsistent across modes: `-l` exits 1 on no match, but `--files-without-match`
+   exits 0 even when it lists nothing. Policy: exit 0/1 = ran fine (use stdout); exit
+   ≥2 = real error → surface `rg`'s stderr and propagate (§12).
+
+### Verified ripgrep behaviors (spike, rg 14.1.0)
+
+Checked empirically against the installed `rg`; the engine design depends on them.
+Re-verify if the pinned `rg` version changes.
+
+| # | Probe | Result | Consequence for `rgq` |
+|---|-------|--------|------------------------|
+| 1 | `rg -l -e PAT` with no path args | scans cwd | empty-candidate short-circuit (hard rule 1) |
+| 2 | `rg -l --null` framing | NUL **terminates** each path (`p1\0p2\0`) | split on `0x00`, drop trailing empty |
+| 3 | `-t`/`-g` with explicit file paths | filter **still applies** | re-applying scope flags while narrowing is safe & idempotent (satisfies §7) |
+| 4 | ignore rules with explicit file paths | **not** applied (explicit path overrides ignore) | fine — candidates are already in-scope `U`, so never an ignored file |
+| 5 | `--files-without-match` | lists given files that don't match; exit 0 even when empty | negatives in one call; rely on stdout (hard rule 2) |
+| 6 | bad-regex term (e.g. `(`) | exit 2, error on stderr | terms are regexes by default; map compile errors to a clear per-term message |
+
+(`.gitignore` is honored only inside a real git repo; `.ignore`/`.rgignore` always.
+Irrelevant to correctness since `U` and all searches share scope, but explains why a
+`target/` entry can appear when testing outside a repo.)
 
 ---
 
@@ -113,9 +144,17 @@ commit. Tests named in §13 are landed in the milestone that makes them pass.
 ### M2 — Front end: lexer + parser + AST  *(spec §4, §13.1)*
 - **Lexer** (§4.1): punctuation `()`; case-insensitive keywords `AND/OR/NOT`;
   barewords run to whitespace/paren; single+double quoted strings always terms;
-  unterminated quote → error.
+  unterminated quote → error. **Quote rules pinned for robustness (spec is silent):** a
+  quote opens a quoted term only at a token boundary (start, or after whitespace/paren);
+  a quote inside a bareword is a literal character; the matching close-quote ends the
+  term; no escape sequences in v1 (to include the other quote char, use the opposite
+  quote style). An **empty term** (`""`, or an empty bareword) is a lex/parse error —
+  never emit an empty pattern to `rg` (it matches every line ⇒ every file).
 - **Parser** (§4.2): recursive descent matching the grammar; precedence
-  `NOT > AND > OR`; parentheses to any depth; **no implicit AND** (adjacency errors).
+  `NOT > AND > OR`; parentheses to any depth; **no implicit AND** — adjacency is caught
+  by a "leftover tokens after a complete parse" check (e.g. `cat dog` leaves `dog`).
+  Guard against stack overflow on pathological nesting (`((((…))))`) with an explicit
+  recursion-depth limit that errors cleanly rather than crashing.
 - Early `--explain` that prints the parsed AST (pre-normalization) to prove the front
   end end-to-end.
 - **Tests (§13.1 lexer/parser):** keyword case-insensitivity; quoted keyword is a
@@ -126,7 +165,12 @@ commit. Tests named in §13 are landed in the milestone that makes them pass.
 
 ### M3 — Normalization  *(spec §6, §13.1 NNF/DNF, §13.2 golden)*
 - **NNF** (§6.1): push `NOT` to leaves; the four De Morgan/double-neg rewrites.
-- **DNF** (§6.2): distribute AND over OR → `Vec<Clause>`.
+- **DNF** (§6.2): distribute AND over OR → `Vec<Clause>`. ⚠ **DEVIATION (robustness):**
+  the spec says document DNF blow-up rather than defeat it (§6.2/§11); we keep that, but
+  add a **clause-count cap** (`--max-clauses`, sensible default) that aborts with a clear
+  error *before* exhausting memory. Failing safe on a 2ⁿ expansion is not "defeating" the
+  blow-up — an unbounded expansion that OOMs the process is itself a robustness bug.
+  Document the cap in `--help`/README.
 - **Cleaning** (§6.3): dedup literals in a clause; drop `t ∧ ¬t` contradictions;
   dedup whole clauses; all-clauses-dropped ⇒ unsatisfiable (stderr note, exit 0).
 - **`explain.rs`** (§9 `--explain`): print normalized clause list (one clause per line,
@@ -135,7 +179,14 @@ commit. Tests named in §13 are landed in the milestone that makes them pass.
 - **Tests:** §13.1 NNF (each rule, double-neg, `NOT (A OR B)`); DNF clause counts
   (`(a OR b) AND (c OR d)` ⇒ 4); dedup; contradiction drop. §13.2 golden `--explain`
   for all 8 listed queries.
-- **Done when:** `rgq --explain '<q>'` is byte-stable and the 8 golden cases pass.
+- **Robustness test (beyond spec):** a **property-based** check (`proptest`) that
+  generates random ASTs and asserts the normalized DNF is (a) structurally a flat
+  OR-of-ANDs-of-literals and (b) **semantically equivalent** to the source AST by
+  brute-forcing the truth table over its distinct terms. This directly targets the
+  spec's stated goal — correctness for *arbitrary* nesting, not just the shapes the
+  author happened to test (§1, §6) — which example-based tests alone can't guarantee.
+- **Done when:** `rgq --explain '<q>'` is byte-stable, the 8 golden cases pass, and the
+  property test holds.
 
 ### M4 — Engine  *(spec §7, §8, §13.3)*
 - **`rg.rs`** process wrapper:
@@ -145,13 +196,22 @@ commit. Tests named in §13 are landed in the milestone that makes them pass.
   - **Batching** (§8.2): when restricting to candidate paths, split into batches under
     an argv-size budget; union per-batch outputs. A pure helper
     `batches(paths, budget) -> Vec<&[Vec<u8>]>` is unit-tested independently of `rg`.
-  - Map `rg` exit codes: 0 = matches, 1 = no matches (**not** an error), ≥2 = real
-    error → surface (§12). `rg` missing → clear error.
+  - Exit-code policy (spike hard rule 2): the result set comes from parsed stdout; exit
+    0/1 = ran fine, exit ≥2 = real error → forward `rg`'s stderr and propagate (§12).
+    `rg` missing → clear error. Map regex-compile failures (exit 2 on a bad term) to a
+    message naming the offending term and clause.
+  - **Never spawn with an empty path batch** (would scan cwd); callers short-circuit ∅.
+- **Shared `ExecutionPlan` type (architectural):** build one plan value (per clause: the
+  seed choice, the ordered narrowing steps, the outer union) that **both** `engine`
+  executes and `explain` renders, so `--explain` can never drift from what actually runs.
+  `explain.rs` formats the plan; `engine.rs` interprets it.
 - **`engine.rs`** per-clause narrowing (§8.1):
   1. Seed: first positive literal via `-l`; if no positive literal, seed from `U`
      (`--files`) and emit the positive-free **warning** to stderr (§8.1.1).
   2. Apply remaining positives via `-l` restricted to candidates.
   3. Apply negatives via `--files-without-match` restricted to candidates.
+  - **Short-circuit:** as soon as the candidate set is empty, stop narrowing this clause
+    (result ∅) — never spawn `rg` with zero paths.
   - Outer OR: union clause results into the final `BTreeSet` (§8.4).
 - **Flag propagation (§7):** `ScopeFlags` go to the universe call **and** every
   pattern call; `MatchFlags` go to every pattern call. This invariant gets its own
@@ -222,6 +282,16 @@ mechanical encoding of it.
    only at human-readable print. `--print0` is the only newline-safe output.
 5. **Leading-dash terms/paths (§8.3)** — easy to regress; the M6 audit + a fixture file
    named like a flag guard it.
+6. **Empty candidate → cwd scan** — the sharpest footgun (spike 1). A missing
+   short-circuit silently returns the whole tree instead of ∅. Guarded in `engine` +
+   `rg.rs`, and a test drives a clause down to ∅ and asserts no spurious results.
+7. **Exit-code misuse** — inferring emptiness from `rg`'s exit code is wrong for
+   `--files-without-match` (spike 5). Always parse stdout; test both modes at empty.
+8. **DNF OOM** — unbounded 2ⁿ expansion can exhaust memory; the `--max-clauses` cap
+   fails safe with a clear message (M3 deviation).
+9. **Stack overflow on deep nesting** — recursion-depth guard in the parser (M2).
+10. **explain/engine drift** — the shared `ExecutionPlan` type (M4) is the structural
+    guarantee they stay in sync.
 
 ---
 
