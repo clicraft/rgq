@@ -1,0 +1,11 @@
+query: (cat AND dog) OR bird
+normal form: 2 clause(s), unioned
+  clause 1: bird
+  clause 2: cat AND dog
+execution plan:
+  clause 1:
+    seed candidates from files matching: bird
+  clause 2:
+    seed candidates from files matching: cat
+    narrow to files also matching: dog
+  union the per-clause results

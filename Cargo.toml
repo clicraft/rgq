@@ -16,3 +16,6 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 thiserror = "2"
+
+[dev-dependencies]
+proptest = "1"

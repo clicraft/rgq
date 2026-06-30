@@ -17,7 +17,8 @@ use std::process::ExitCode;
 
 use clap::{ArgAction, Parser};
 
-use crate::{lexer, parser};
+use crate::ast::Normalized;
+use crate::{explain, lexer, normalize, parser};
 
 const ABOUT: &str = "A boolean-query front end for ripgrep: combine terms with AND, OR, NOT \
 and parentheses; rgq reports the set of files satisfying the expression, optionally as a tree.";
@@ -87,6 +88,12 @@ pub struct Cli {
     #[arg(short = 'g', value_name = "GLOB", help_heading = "Scope")]
     glob: Vec<String>,
 
+    // ---- limits ----
+    /// Maximum number of clauses a query may expand to in normal form. Guards
+    /// against the combinatorial blow-up of disjunctive normal form.
+    #[arg(long = "max-clauses", value_name = "N", default_value_t = 1024, help_heading = "Limits")]
+    max_clauses: usize,
+
     // ---- the query ----
     /// Boolean query, e.g. '(cat OR dog) AND NOT bird'. Several words are joined with spaces.
     #[arg(value_name = "QUERY")]
@@ -134,6 +141,7 @@ pub struct Config {
     pub scope_flags: ScopeFlags,
     pub output: OutputMode,
     pub explain: bool,
+    pub max_clauses: usize,
 }
 
 impl Cli {
@@ -179,6 +187,7 @@ impl Cli {
             scope_flags,
             output,
             explain: self.explain,
+            max_clauses: self.max_clauses,
         })
     }
 }
@@ -228,11 +237,11 @@ fn report_clap_error(err: clap::Error) -> ExitCode {
 
 /// Act on a validated [`Config`].
 ///
-/// M2: the query is lexed and parsed, so malformed queries are reported as usage
-/// errors (exit 2, spec §12) and `--explain` shows the parsed expression.
-/// Normalization (M3) and execution (M4) are not built yet; until then a runnable
-/// query reports the parsed form and exits non-zero rather than pretending to
-/// search.
+/// M3: the query is lexed, parsed, and normalized to DNF. `--explain` renders the
+/// normalized clauses and the execution plan; an unsatisfiable query is reported
+/// and exits 0 (spec §12) without needing the engine. Actual search execution
+/// (M4) is not built yet, so a satisfiable runnable query reports its normal form
+/// and exits non-zero rather than pretending to search.
 fn dispatch(config: &Config) -> ExitCode {
     let tokens = match lexer::lex(&config.query) {
         Ok(tokens) => tokens,
@@ -250,15 +259,26 @@ fn dispatch(config: &Config) -> ExitCode {
         }
     };
 
+    let normalized = match normalize::normalize(&ast, config.max_clauses) {
+        Ok(normalized) => normalized,
+        Err(err) => {
+            eprintln!("rgq: {err}");
+            return ExitCode::from(2);
+        }
+    };
+
     if config.explain {
-        // M2 explain: the parsed expression. The normalized clause list and the
-        // execution plan (and the golden tests over them) arrive in M3.
-        println!("parsed query: {ast}");
-        eprintln!("note: normalized clauses and the execution plan are not implemented yet (milestone M3)");
+        print!("{}", explain::explain(&ast, &normalized));
         return ExitCode::SUCCESS;
     }
 
-    eprintln!("rgq: query parsed OK, but execution is not implemented yet (milestone M4).");
+    // An unsatisfiable query needs no search: report and succeed (spec §12).
+    if matches!(normalized, Normalized::Unsatisfiable) {
+        eprintln!("rgq: query is unsatisfiable (every clause is self-contradictory); it matches no files");
+        return ExitCode::SUCCESS;
+    }
+
+    eprintln!("rgq: query parsed and normalized OK, but execution is not implemented yet (milestone M4).");
     eprintln!("  parsed query: {ast}");
     ExitCode::FAILURE
 }

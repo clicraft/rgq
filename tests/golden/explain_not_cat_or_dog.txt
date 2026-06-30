@@ -1,0 +1,9 @@
+query: NOT (cat OR dog)
+normal form: 1 clause(s), unioned
+  clause 1: NOT cat AND NOT dog
+execution plan:
+  clause 1:
+    seed candidates from all files in scope (no positive term — scans everything)
+    narrow to files NOT matching: cat
+    narrow to files NOT matching: dog
+  union the per-clause results

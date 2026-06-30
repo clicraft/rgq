@@ -1,0 +1,7 @@
+query: NOT (NOT cat)
+normal form: 1 clause(s), unioned
+  clause 1: cat
+execution plan:
+  clause 1:
+    seed candidates from files matching: cat
+  union the per-clause results

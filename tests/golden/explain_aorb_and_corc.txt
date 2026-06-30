@@ -1,0 +1,20 @@
+query: (a OR b) AND (c OR d)
+normal form: 4 clause(s), unioned
+  clause 1: a AND c
+  clause 2: a AND d
+  clause 3: b AND c
+  clause 4: b AND d
+execution plan:
+  clause 1:
+    seed candidates from files matching: a
+    narrow to files also matching: c
+  clause 2:
+    seed candidates from files matching: a
+    narrow to files also matching: d
+  clause 3:
+    seed candidates from files matching: b
+    narrow to files also matching: c
+  clause 4:
+    seed candidates from files matching: b
+    narrow to files also matching: d
+  union the per-clause results

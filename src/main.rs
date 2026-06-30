@@ -16,7 +16,9 @@ use std::process::ExitCode;
 
 mod ast;
 mod cli;
+mod explain;
 mod lexer;
+mod normalize;
 mod parser;
 
 fn main() -> ExitCode {

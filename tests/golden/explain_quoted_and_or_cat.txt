@@ -1,0 +1,10 @@
+query: AND OR cat
+normal form: 2 clause(s), unioned
+  clause 1: AND
+  clause 2: cat
+execution plan:
+  clause 1:
+    seed candidates from files matching: AND
+  clause 2:
+    seed candidates from files matching: cat
+  union the per-clause results

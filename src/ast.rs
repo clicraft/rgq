@@ -65,13 +65,83 @@ fn parenthesized(a: &Ast) -> String {
     }
 }
 
-fn render_term(t: &[u8]) -> String {
+/// Render a term for human display: quoted if it contains whitespace (i.e. came
+/// from a quoted string), otherwise as-is (lossily, for non-UTF-8 bytes). Shared
+/// by the AST, clause, and `--explain` rendering.
+pub fn render_term(t: &[u8]) -> String {
     let s = String::from_utf8_lossy(t);
     if s.is_empty() || s.chars().any(char::is_whitespace) {
         format!("\"{s}\"")
     } else {
         s.into_owned()
     }
+}
+
+// ---- Normalized (DNF) representation ----------------------------------------
+//
+// After normalization (NNF then DNF, spec §6) every query has the same shape: a
+// union of conjunctive clauses. A `Literal` is a term, possibly negated; a
+// `Clause` is an AND of literals; a `ClauseList` is an OR of clauses. The engine
+// only ever has to handle "a clause" and "a union of clauses".
+
+/// A literal: a term, possibly negated. The atom of a DNF clause.
+///
+/// `Ord` is `(term, negated)` so literals sort by term with the positive form
+/// before the negative — which makes deduplication and contradiction detection
+/// within a clause straightforward.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Literal {
+    pub term: Vec<u8>,
+    pub negated: bool,
+}
+
+impl Literal {
+    pub fn positive(term: Vec<u8>) -> Literal {
+        Literal { term, negated: false }
+    }
+    pub fn negative(term: Vec<u8>) -> Literal {
+        Literal { term, negated: true }
+    }
+}
+
+impl fmt::Display for Literal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.negated {
+            write!(f, "NOT {}", render_term(&self.term))
+        } else {
+            write!(f, "{}", render_term(&self.term))
+        }
+    }
+}
+
+/// A clause: an AND of literals. The engine evaluates one by progressive
+/// narrowing (spec §8.1). Literals are kept sorted and deduplicated.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Clause {
+    pub literals: Vec<Literal>,
+}
+
+impl fmt::Display for Clause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let parts: Vec<String> = self.literals.iter().map(ToString::to_string).collect();
+        write!(f, "{}", parts.join(" AND "))
+    }
+}
+
+/// The normalized query: an OR (union) of clauses — disjunctive normal form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClauseList {
+    pub clauses: Vec<Clause>,
+}
+
+/// Result of normalizing a query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Normalized {
+    /// A satisfiable query: a non-empty union of clauses.
+    Clauses(ClauseList),
+    /// Every clause was self-contradictory (e.g. `t AND NOT t`); the query
+    /// denotes the empty set (spec §6.3).
+    Unsatisfiable,
 }
 
 #[cfg(test)]

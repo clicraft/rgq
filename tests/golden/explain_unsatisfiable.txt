@@ -1,0 +1,2 @@
+query: cat AND (NOT cat)
+unsatisfiable: every clause is self-contradictory — matches no files

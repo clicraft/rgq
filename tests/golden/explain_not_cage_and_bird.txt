@@ -1,0 +1,8 @@
+query: (NOT cage) AND bird
+normal form: 1 clause(s), unioned
+  clause 1: bird AND NOT cage
+execution plan:
+  clause 1:
+    seed candidates from files matching: bird
+    narrow to files NOT matching: cage
+  union the per-clause results
