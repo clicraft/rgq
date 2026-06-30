@@ -1,0 +1,8 @@
+# Rust build artifacts
+/target
+
+# Cargo lockfile is kept (binary crate)
+
+# Editor / OS noise
+*.swp
+.DS_Store
