@@ -5,7 +5,8 @@ specification). The spec is the source of truth for **what** to build; this docu
 is the source of truth for **how and in what order** to build it. Section references
 (§) point back to the spec.
 
-Status: **planning** — no code written yet.
+Status: **M1 done** (CLI skeleton: arg parsing, match-vs-scope classification, exit
+codes; 20 tests green). Next up: M2 (lexer + parser + AST).
 
 ---
 
