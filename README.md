@@ -337,4 +337,4 @@ real fixture trees through the real binary and `rg`.
 
 ## License
 
-Licensed under either of MIT or Apache-2.0 at your option.
+Licensed under either of [MIT](./LICENSE-MIT) or [Apache-2.0](./LICENSE-APACHE) at your option.

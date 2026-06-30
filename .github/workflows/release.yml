@@ -1,0 +1,170 @@
+name: Release
+
+# Builds and publishes binaries for a tagged version. rgq is Linux-only by
+# design (see ci.yml's comment / SECURITY.md), so this ships exactly two
+# targets — the two architectures that actually matter for a Linux CLI tool —
+# each statically linked against musl so the binary runs on any Linux distro
+# regardless of glibc version, with no dynamic-linking compatibility concerns
+# at all (rgq has no C dependencies, so a musl build is straightforward).
+#
+# Triggers:
+#   - push of a `vX.Y.Z` tag (the existing tagging convention, e.g. v0.1.2):
+#     the normal path — tag a release, get a release.
+#   - workflow_dispatch with an explicit `tag`: re-run against an existing
+#     tag (e.g. to backfill a release, or retry after a transient failure)
+#     without creating a new tag. `draft: true` produces a draft release for
+#     verifying the pipeline without publishing anything public.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and release (e.g. v0.1.2)"
+        required: true
+      draft:
+        description: "Create as a draft release (not publicly visible until published)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  REF: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+jobs:
+  # The tag is the source of truth for the version everyone sees (release
+  # title, asset filenames); Cargo.toml is the source of truth for what
+  # actually got built. They must agree, or a release could silently ship a
+  # binary whose --version disagrees with its own filename/tag.
+  check-version:
+    name: tag matches Cargo.toml version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REF }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compare tag to Cargo.toml
+        id: check
+        run: |
+          tag="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          tag_version="${tag#v}"
+          cargo_version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          echo "tag: $tag (version $tag_version) — Cargo.toml: $cargo_version"
+          if [ "$tag_version" != "$cargo_version" ]; then
+            echo "::error::Tag $tag implies version $tag_version, but Cargo.toml has $cargo_version — bump one to match."
+            exit 1
+          fi
+          echo "version=$cargo_version" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: test
+    needs: check-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REF }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install ripgrep
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+      - run: cargo test --locked --verbose
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REF }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install musl-tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Smoke-test the built binary
+        # Both runners are *native* to their target's architecture (no
+        # cross-compilation, no QEMU), so the freshly built binary can just
+        # be executed directly as a sanity check before it gets packaged.
+        run: ./target/${{ matrix.target }}/release/rgq --version
+
+      - name: Package
+        id: package
+        run: |
+          version="${{ needs.check-version.outputs.version }}"
+          pkg="rgq-${version}-${{ matrix.target }}"
+          mkdir "$pkg"
+          cp "target/${{ matrix.target }}/release/rgq" "$pkg/"
+          cp README.md LICENSE-MIT LICENSE-APACHE "$pkg/"
+          tar czf "${pkg}.tar.gz" "$pkg"
+          sha256sum "${pkg}.tar.gz" > "${pkg}.tar.gz.sha256"
+          echo "pkg=${pkg}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.pkg }}
+          path: |
+            ${{ steps.package.outputs.pkg }}.tar.gz
+            ${{ steps.package.outputs.pkg }}.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: [check-version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REF }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Extract this version's CHANGELOG section
+        id: notes
+        run: |
+          version="${{ needs.check-version.outputs.version }}"
+          awk -v ver="[${version}]" '
+            /^## \[/ { if (found) exit; if (index($0, ver)) { found=1; next } }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          echo "Extracted $(wc -l < release-notes.md) line(s) of release notes for $version"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.check-version.outputs.version }}
+          name: rgq ${{ needs.check-version.outputs.version }}
+          body_path: release-notes.md
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          files: artifacts/*
