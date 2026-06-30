@@ -256,6 +256,9 @@ commit. Tests named in §13 are landed in the milestone that makes them pass.
 
 ## 4. Testing strategy (spec §13) — summary checklist
 
+The concrete suite design — exact inputs/expected outputs, the validated fixture, helpers,
+and the edge-case catalogue — lives in [`TEST_PLAN.md`](./TEST_PLAN.md). Checklist:
+
 - [ ] **§13.1 Unit** — lexer, parser, NNF, DNF (in-module `#[cfg(test)]`).
 - [ ] **§13.2 Golden `--explain`** — the 8 listed queries, exact output.
 - [ ] **§13.3 Integration** — fixture tree (`tempfile`/`assert_cmd`); AND/OR/NOT/nested
