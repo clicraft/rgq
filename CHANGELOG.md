@@ -15,6 +15,44 @@ with a date, add a fresh empty "Unreleased" section, and update the links at the
 
 _No unreleased changes._
 
+## [0.1.1] - 2026-07-01
+
+A second security review, focused on the attack classes a CLI search tool that spawns a
+subprocess and prints attacker-influenceable filenames is exposed to (output spoofing,
+environment-driven argument injection into the spawned process, and unbounded-input resource
+exhaustion). One finding was Critical; the rest were Medium or lower.
+
+### Security
+
+- **Critical — fixed.** `RIPGREP_CONFIG_PATH` could point ripgrep at a config file injecting
+  `--pre <program>`, which runs an external command on every file searched — arbitrary command
+  execution gated only by one environment variable. Confirmed exploitable against bare `rg` with
+  a working proof of concept before fixing it. Every `rg` invocation now passes `--no-config`,
+  verified end-to-end against the same proof-of-concept attack.
+- **Medium — fixed.** Unicode bidirectional-override and invisible/zero-width characters in
+  filenames (the "Trojan Source" class, CVE-2021-42574) passed through unescaped, unlike plain
+  control bytes, allowing a crafted filename to spoof what it displays as. Now neutralized
+  alongside the existing terminal-escape sanitization, when output goes to a terminal.
+- **Medium — fixed.** The tree renderer recursed once per path-nesting level with no bound;
+  confirmed to stack-overflow around depth 50,000 on a synthetic path (not reachable through a
+  real filesystem's `PATH_MAX` today, but unguarded). Bounded to a 100-level depth cap, mirroring
+  the parser's existing recursion guard; a path nested past the cap is truncated with a visible
+  marker rather than silently dropped.
+- **Low — documented.** A TOCTOU symlink race between candidate-listing and narrowing is inherent
+  to spawning `rg` with an explicit path list (shared by `xargs`, `grep -f`, and similar tools);
+  documented as a residual risk rather than fixed, since fixing it would require a different
+  search architecture than this project deliberately chose.
+- **Supply chain — checked, clean.** `cargo audit` against the RustSec advisory database reports
+  zero vulnerabilities across all 57 resolved dependencies.
+
+See [`SECURITY.md`](./SECURITY.md) findings 11-15 for full detail, including an honest account of
+a development-time mistake: an earlier attempt at the tree-renderer fix replaced recursion with
+an iterative rewrite alone (no depth bound) and was validated with a test deep enough to hit a
+separate `O(depth²)` memory cost in the prefix-string handling, which crashed the development host
+via the OOM killer. The lesson — a fix for unbounded input should be validated with bounded
+inputs near the actual limit, not yet-larger unbounded ones — is recorded in `SECURITY.md` rather
+than scrubbed from the record.
+
 ## [0.1.0] - 2026-06-30
 
 Initial release: a boolean-query front end for [ripgrep](https://github.com/BurntSushi/ripgrep).
@@ -62,5 +100,6 @@ reports the set of files satisfying it, optionally rendered as a tree.
   `--` end-of-options marker, so neither a query term nor a filename can be misread as a flag. See
   [`SECURITY.md`](./SECURITY.md) for the full threat model.
 
-[Unreleased]: https://github.com/clicraft/rgq/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/clicraft/rgq/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/clicraft/rgq/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/clicraft/rgq/releases/tag/v0.1.0

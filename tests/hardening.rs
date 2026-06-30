@@ -5,6 +5,7 @@
 use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -178,8 +179,6 @@ fn piped_output_is_raw() {
 /// assertion holds either way.)
 #[test]
 fn unreadable_file_does_not_fail_the_whole_query() {
-    use std::os::unix::fs::PermissionsExt;
-
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("readable.txt"), "cat\n").unwrap();
     let unreadable = dir.path().join("unreadable.txt");
@@ -198,5 +197,62 @@ fn unreadable_file_does_not_fail_the_whole_query() {
     assert!(
         String::from_utf8_lossy(&out.stdout).contains("readable.txt"),
         "the readable match must still be returned"
+    );
+}
+
+/// Security: `RIPGREP_CONFIG_PATH` must not be able to inject extra flags into
+/// `rg`, because ripgrep's `--pre <program>` flag runs an external command on
+/// *every file searched* before searching it — arbitrary command execution if an
+/// attacker can get a config file referenced that way. Confirmed exploitable
+/// against bare `rg` during the security review; this proves `rgq` (which always
+/// passes `--no-config`, see `src/rg.rs`) is not.
+#[test]
+fn ripgrep_config_path_cannot_inject_a_preprocessor_command() {
+    // The search target lives in its own directory, containing nothing but the
+    // one matching file — so the attacker's helper script (kept in a *separate*
+    // directory, never searched) can't accidentally show up as a search hit.
+    let search_dir = TempDir::new().unwrap();
+    fs::write(search_dir.path().join("target.txt"), "cat\n").unwrap();
+
+    let attacker_dir = TempDir::new().unwrap();
+
+    // A "proof" sentinel file: the malicious preprocessor script writes to it
+    // if (and only if) it actually got executed by rg.
+    let proof = attacker_dir.path().join("pwned_proof");
+
+    let preprocessor = attacker_dir.path().join("evil_preprocessor.sh");
+    fs::write(
+        &preprocessor,
+        format!(
+            "#!/bin/sh\necho PWNED >> '{}'\ncat \"$1\"\n",
+            proof.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&preprocessor, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let ripgreprc = attacker_dir.path().join("evil.ripgreprc");
+    fs::write(&ripgreprc, format!("--pre\n{}\n", preprocessor.display())).unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_rgq"))
+        .current_dir(search_dir.path())
+        .env("RIPGREP_CONFIG_PATH", &ripgreprc)
+        .arg("cat")
+        .output()
+        .expect("spawn rgq");
+
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "target.txt\n",
+        "the query must still work normally"
+    );
+    assert!(
+        !proof.exists(),
+        "the injected --pre preprocessor must NOT have executed — RIPGREP_CONFIG_PATH must be neutralized"
     );
 }

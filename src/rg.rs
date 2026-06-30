@@ -69,7 +69,7 @@ impl Rg {
     /// List every file in scope — the universe `U` (spec §7). Used to seed
     /// positive-free clauses.
     pub fn list_files(&self) -> Result<Vec<Vec<u8>>, RgError> {
-        let mut base = vec![OsString::from("--files"), OsString::from("--null")];
+        let mut base = base_args("--files");
         base.extend(self.scope_args.iter().cloned());
         self.spawn(&base) // no path args: search the cwd
     }
@@ -100,10 +100,11 @@ impl Rg {
         self.run_batched(&base, paths)
     }
 
-    /// Base argv for a pattern-bearing mode: `<mode> --null <scope> <match> -e PAT`.
-    /// `-e` guards a leading-dash pattern from being read as a flag (spec §8.3).
+    /// Base argv for a pattern-bearing mode: `<mode> --no-config --null <scope>
+    /// <match> -e PAT`. `-e` guards a leading-dash pattern from being read as a
+    /// flag (spec §8.3).
     fn pattern_base(&self, mode: &str, pattern: &[u8]) -> Vec<OsString> {
-        let mut base = vec![OsString::from(mode), OsString::from("--null")];
+        let mut base = base_args(mode);
         base.extend(self.scope_args.iter().cloned());
         base.extend(self.match_args.iter().cloned());
         base.push(OsString::from("-e"));
@@ -174,6 +175,25 @@ impl Rg {
             }),
         }
     }
+}
+
+/// The non-negotiable prefix for every `rg` invocation: `<mode> --no-config --null`.
+///
+/// `--no-config` stops `rg` from reading `RIPGREP_CONFIG_PATH` (or any other config
+/// file ripgrep might grow). Without it, an attacker who can set an environment
+/// variable that reaches `rgq` — or who can get a `.ripgreprc`-style file pointed
+/// to that way — can inject arbitrary `rg` flags into *every* invocation,
+/// including `--pre <program>`, which runs an external command on every file
+/// before searching it: **arbitrary command execution**, confirmed by a
+/// proof-of-concept during the security review (see SECURITY.md). `rgq` already
+/// sets every flag it cares about explicitly, so it never needs the user's
+/// ripgrep config, and unconditionally disabling it costs nothing.
+fn base_args(mode: &str) -> Vec<OsString> {
+    vec![
+        OsString::from(mode),
+        OsString::from("--no-config"),
+        OsString::from("--null"),
+    ]
 }
 
 /// Map match flags to ripgrep flags (apply to every pattern-bearing call, §7).
@@ -343,6 +363,30 @@ mod tests {
                 OsString::from("--glob"),
                 OsString::from("*.x"),
             ]
+        );
+    }
+
+    /// Security: every invocation must disable ripgrep's own config-file loading.
+    /// Without `--no-config`, `RIPGREP_CONFIG_PATH` (or a future ripgrep config
+    /// mechanism) can inject arbitrary `rg` flags — including `--pre <program>`,
+    /// which executes a command per file (see SECURITY.md). This must hold for
+    /// every mode rgq uses: list-with-match, list-without-match, and list-files.
+    #[test]
+    fn every_mode_disables_rg_config_loading() {
+        assert_eq!(
+            base_args("-l")[..2],
+            [OsString::from("-l"), OsString::from("--no-config")]
+        );
+        assert_eq!(
+            base_args("--files-without-match")[..2],
+            [
+                OsString::from("--files-without-match"),
+                OsString::from("--no-config")
+            ]
+        );
+        assert_eq!(
+            base_args("--files")[..2],
+            [OsString::from("--files"), OsString::from("--no-config")]
         );
     }
 }

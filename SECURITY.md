@@ -39,6 +39,11 @@ daemon; it runs with exactly the privileges of the user who launched it.
 | 8 | Argument injection into `rg` (terms/paths read as flags) | — | **Not vulnerable** |
 | 9 | Shell / command injection | — | **Not vulnerable** |
 | 10 | ReDoS via a regex term | — | **Not vulnerable** |
+| 11 | `RIPGREP_CONFIG_PATH` → ripgrep `--pre` arbitrary command execution | **Critical** | **Fixed** |
+| 12 | Unicode bidi-override / invisible-character filename spoofing ("Trojan Source") | Medium | **Fixed** |
+| 13 | Tree renderer: unbounded path depth (stack overflow) | Medium | **Fixed** |
+| 14 | TOCTOU symlink race between candidate listing and narrowing | Low | **Documented (inherent)** |
+| 15 | Supply-chain: dependency vulnerabilities | — | **Checked: clean** |
 
 ### 1. Terminal escape-sequence injection via filenames — *fixed*
 
@@ -137,6 +142,99 @@ Terms are regexes by default, but `rgq` uses ripgrep's **default regex engine**,
 linear-time matching (no catastrophic backtracking). `rgq` does **not** expose ripgrep's PCRE2
 mode (`-P`). Pathologically large regexes are bounded by ripgrep's own `--regex-size-limit`.
 
+### 11. `RIPGREP_CONFIG_PATH` → ripgrep `--pre` arbitrary command execution — *fixed*
+
+**The most serious finding in this review.** Ripgrep itself reads the `RIPGREP_CONFIG_PATH`
+environment variable and, if set, loads extra command-line flags from the file it points to —
+*before* the flags `rgq` passes. Ripgrep also has a `--pre <program>` flag: when set, ripgrep
+runs `<program> <file>` for **every file it searches** and searches the program's output instead
+of the file. Put together: if an attacker can get `RIPGREP_CONFIG_PATH` pointed at a file
+containing `--pre /some/script`, every `rgq` invocation runs `/some/script` once per file in
+scope — **arbitrary command execution**, gated only by control over one environment variable.
+
+This was confirmed with a working proof of concept against bare `rg` during this review (a
+preprocessor script that wrote a sentinel file ran successfully via `RIPGREP_CONFIG_PATH` +
+`--pre`), then verified end-to-end that the fix below blocks it.
+
+**Fix.** Every `rg` invocation now includes `--no-config`, which makes ripgrep ignore
+`RIPGREP_CONFIG_PATH` entirely. `rgq` already sets every flag it cares about explicitly, so it
+never relied on the user's ripgrep config for anything — disabling it costs no functionality.
+See `base_args` in `src/rg.rs`, `every_mode_disables_rg_config_loading` (unit test), and
+`ripgrep_config_path_cannot_inject_a_preprocessor_command` (end-to-end test that plants the
+exact attack and asserts the preprocessor never runs).
+
+### 12. Unicode bidi-override / invisible-character filename spoofing — *fixed*
+
+Finding 1 escaped raw control bytes, but a file name can also carry **Unicode** characters that
+change how text *displays* without changing the underlying bytes — the "Trojan Source" class
+(CVE-2021-42574). For example a file named `cat<RLO>txt.gpj<PDF>` (where `<RLO>`/`<PDF>` are the
+right-to-left-override and pop-directional-formatting codepoints) renders as `cat` followed by
+text that *looks like* `jpg.txt`, even though the real name ends in `.gpj`. These are multi-byte
+UTF-8 sequences (`>= 0x80`) that the original control-byte escaping didn't touch — confirmed by
+reproducing the spoofed rendering with a real crafted filename before fixing it.
+
+**Fix.** The same TTY-only sanitizer now also escapes a denylist of bidirectional format
+characters (LRE/RLE/PDF/LRO/RLO/LRI/RLI/FSI/PDI) and common invisible characters (zero-width
+space/non-joiner/joiner, word joiner, BOM) to a visible `\u{XXXX}` form. This is **deliberately
+narrow**: it does not attempt general homoglyph/confusable detection (e.g. Cyrillic vs Latin
+lookalikes) — that's a much larger, fuzzy problem with real false-positive risk for legitimate
+non-Latin filenames, and is a residual risk (see below), not something this fix claims to solve.
+See `DANGEROUS_CODEPOINTS` in `src/cli.rs`.
+
+### 13. Tree renderer: unbounded path depth — *fixed*
+
+The tree renderer recurses once per path-nesting level. A path's depth comes from whatever tree
+`rgq` is pointed at, so it's attacker-influenceable; a standalone harness confirmed an unbounded
+recursive implementation reliably **stack-overflows around depth 50,000** (synthetic, in-memory —
+independent of any filesystem `PATH_MAX`). Real filesystem paths can't reach that depth (Linux
+`PATH_MAX` is ~4096 bytes, capping real nesting in the low thousands at most), so this was not
+reachable through the normal `rg --files` pipeline — but the function had no guard and silently
+depended on that external, implicit limit holding.
+
+**Fix.** A depth cap (`MAX_DEPTH = 100`, mirroring the parser's existing recursion-depth guard)
+truncates a path nested past the cap with a visible `... (truncated: nested past 100 levels)`
+marker instead of continuing to recurse. 100 is far beyond any real directory tree.
+
+**A note on how this fix was arrived at, in the interest of an honest record:** the first attempt
+replaced the recursion with an iterative, heap-stack-based traversal and was validated with a
+test that rendered a *synthetic, 2-million-level-deep* path. That test itself allocated on the
+order of terabytes (the per-level prefix string is cloned at every level, an `O(depth²)` cost
+independent of recursive-vs-iterative implementation) and **crashed the development host via the
+OOM killer**. The mistake was conflating "remove the stack-overflow class" with "depth should be
+unbounded" — they're different problems, and once a sane depth cap is in place (which is needed
+regardless, to bound the `O(depth²)` prefix-copy cost), plain bounded recursion is simpler and
+sufficient; the iterative rewrite was reverted. The lesson generalizes: a fix for an
+unbounded-input class should itself be validated with *bounded* inputs near the actual limit, not
+yet-larger unbounded ones.
+
+### 14. TOCTOU symlink race between listing and narrowing — *documented, inherent*
+
+Per-clause narrowing (spec §8.1) seeds a candidate file list from one `rg` invocation, then passes
+those same paths back to `rg` in a later invocation. If an attacker who can write into the
+directory being searched swaps a candidate file for a symlink to a sensitive file (e.g.
+`/etc/shadow`) between those two calls, the later call may search the symlink's target. The result
+returned is still the original filename (not the target's), so what could leak is a single bit:
+whether the targeted file matches a given term.
+
+This is a classic local TOCTOU race shared by virtually every CLI tool that passes an explicit
+file list to a second command (`xargs`, `grep -f`, etc.) — not specific to `rgq`'s design. Fixing
+it would require not passing paths back to `rg` as arguments at all (e.g. opening file descriptors
+directly and feeding ripgrep's library crates instead of the `rg` binary), which is a different
+architecture than the one this project deliberately chose (PLAN.md §2.1: spawn `rg`, don't
+reimplement search) and is noted there as a possible future direction. Documented here rather than
+"fixed" because no fix is possible without that larger architectural change; it requires local
+write access to the search target, which is already a high level of access.
+
+### 15. Supply chain: dependency vulnerabilities — *checked, clean*
+
+`rgq`'s dependency tree is small (`clap`, `thiserror`, plus their transitive deps — all
+widely-used, actively maintained crates; see `cargo tree`). `cargo audit` (RustSec advisory
+database, 1,146 advisories at time of scan) reports **zero vulnerabilities** across all 57
+resolved dependencies. This is a point-in-time result, not a guarantee — new advisories are
+published continuously. **Recommendation:** run `cargo audit` in CI on a schedule (not just at
+release time), since a clean scan today says nothing about a CVE disclosed next month against a
+crate already in the dependency tree.
+
 ---
 
 ## Residual risks & operator guidance
@@ -152,6 +250,13 @@ mode (`-P`). Pathologically large regexes are bounded by ripgrep's own `--regex-
   paths it reports.
 - **Use `--print0` for any machine consumption** of the output. Line-based parsing of the default
   output is only safe for filenames without newlines.
+- **General homoglyph/confusable spoofing is out of scope.** Finding 12 neutralizes bidi-override
+  and invisible characters specifically, not visual lookalikes in general (e.g. Cyrillic `а` vs
+  Latin `a`). Don't rely on `rgq`'s output to visually distinguish two filenames that are
+  designed to look alike.
+- **The TOCTOU race in finding 14** means a result set is a snapshot, not a guarantee — if the
+  search target is being concurrently modified by an untrusted party, don't treat `rgq`'s output
+  as proof of what those files currently contain.
 
 ## Reporting
 

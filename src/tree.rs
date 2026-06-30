@@ -35,6 +35,17 @@ const ELBOW: &[u8] = "└── ".as_bytes(); // last child
 const PIPE: &[u8] = "│   ".as_bytes(); // ancestor line continues
 const GAP: &[u8] = b"    "; // ancestor was the last child
 
+/// Maximum path nesting depth the renderer descends into. Mirrors the parser's
+/// `MAX_DEPTH` guard (`src/parser.rs`) against the same class of risk: a path's
+/// component count comes from whatever tree `rgq` is pointed at (spec §10.3), so
+/// it is attacker-influenceable, and unbounded recursion is a stack-overflow risk
+/// (confirmed empirically: ~50,000 levels reliably overflows an 8 MiB stack).
+/// 100 is far beyond any real directory tree (legitimate nesting rarely exceeds a
+/// few dozen levels) but keeps recursion trivially cheap and safe regardless of
+/// input. A path deeper than this is truncated, not silently dropped — see
+/// `render_children`.
+const MAX_DEPTH: usize = 100;
+
 /// Render `paths` as an ASCII tree, returning raw bytes (UTF-8 glyphs plus
 /// verbatim component bytes). A single `.` root line is printed above the tree.
 pub fn render<'a, I>(paths: I) -> Vec<u8>
@@ -48,11 +59,27 @@ where
 
     let mut out = Vec::new();
     out.extend_from_slice(b".\n");
-    render_children(&root, b"", &mut out);
+    render_children(&root, b"", 0, &mut out);
     out
 }
 
-fn render_children(node: &Node, prefix: &[u8], out: &mut Vec<u8>) {
+/// Depth-first, pre-order render. `depth` counts levels already descended;
+/// reaching [`MAX_DEPTH`] truncates the remaining subtree with a visible marker
+/// instead of continuing to recurse, so a pathologically deep path bounds the
+/// work done (and is reported, not silently dropped) rather than risking a stack
+/// overflow.
+fn render_children(node: &Node, prefix: &[u8], depth: usize, out: &mut Vec<u8>) {
+    if depth >= MAX_DEPTH {
+        if !node.children.is_empty() {
+            out.extend_from_slice(prefix);
+            out.extend_from_slice(ELBOW);
+            out.extend_from_slice(
+                format!("... (truncated: nested past {MAX_DEPTH} levels)\n").as_bytes(),
+            );
+        }
+        return;
+    }
+
     let last_index = node.children.len().saturating_sub(1);
     for (i, (name, child)) in node.children.iter().enumerate() {
         let is_last = i == last_index;
@@ -64,7 +91,7 @@ fn render_children(node: &Node, prefix: &[u8], out: &mut Vec<u8>) {
 
         let mut child_prefix = prefix.to_vec();
         child_prefix.extend_from_slice(if is_last { GAP } else { PIPE });
-        render_children(child, &child_prefix, out);
+        render_children(child, &child_prefix, depth + 1, out);
     }
 }
 
@@ -135,6 +162,66 @@ mod tests {
     fn t6_empty_input_is_just_the_root() {
         let bytes = render(std::iter::empty());
         assert_eq!(bytes, b".\n");
+    }
+
+    /// Build a synthetic path with `n_dirs` directory components plus a trailing
+    /// `leaf` file (so `n_dirs + 1` total path components). Small, fixed sizes
+    /// only — this exists to probe the [`MAX_DEPTH`] boundary precisely, not to
+    /// stress-test depth (see `t9` below for why that's the wrong instinct).
+    fn deep_path(n_dirs: usize) -> Vec<u8> {
+        let mut path = Vec::with_capacity(n_dirs * 4);
+        for i in 0..n_dirs {
+            path.extend_from_slice(format!("d{i}/").as_bytes());
+        }
+        path.extend_from_slice(b"leaf");
+        path
+    }
+
+    /// Security: a path nested deeper than [`MAX_DEPTH`] total components is
+    /// truncated with a visible marker rather than rendered in full or causing
+    /// unbounded recursion.
+    ///
+    /// (A prior version of this test tried to validate the *absence* of a depth
+    /// limit by rendering a path with millions of levels — that's exactly what
+    /// the cap exists to prevent, and the test itself OOM-killed the host. Keep
+    /// depths here small, fixed, and bounded near `MAX_DEPTH`, never huge.)
+    #[test]
+    fn t9_path_deeper_than_max_depth_is_truncated_not_unbounded() {
+        // MAX_DEPTH dirs + 1 leaf = MAX_DEPTH + 1 total components: one past the
+        // cap, so exactly MAX_DEPTH names render (d0..d{MAX_DEPTH-1}) and the
+        // leaf is cut.
+        let path = deep_path(MAX_DEPTH);
+        let text = String::from_utf8(render(std::iter::once(path.as_slice()))).unwrap();
+
+        assert!(text.starts_with(".\n"));
+        assert!(
+            text.contains("truncated"),
+            "expected a visible truncation marker, got: {text}"
+        );
+        assert!(
+            text.contains(&format!("d{}", MAX_DEPTH - 1)),
+            "last component within the cap must render"
+        );
+        assert!(
+            !text.contains(&format!("d{MAX_DEPTH}")),
+            "the first component past the cap must not render"
+        );
+        assert!(!text.contains("leaf"), "must not render past the depth cap");
+    }
+
+    #[test]
+    fn max_depth_exactly_at_the_cap_renders_in_full_no_truncation() {
+        // (MAX_DEPTH - 1) dirs + 1 leaf = exactly MAX_DEPTH total components.
+        // Must render completely, with no truncation marker — the cap must not
+        // be off-by-one and clip legitimate, if unusually deep, real trees.
+        let path = deep_path(MAX_DEPTH - 1);
+        let text = String::from_utf8(render(std::iter::once(path.as_slice()))).unwrap();
+
+        assert!(
+            !text.contains("truncated"),
+            "exactly-at-cap must not truncate; got: {text}"
+        );
+        assert!(text.ends_with("leaf\n"));
     }
 
     #[test]

@@ -368,18 +368,59 @@ fn display_path(path: &[u8], escape: bool) -> Vec<u8> {
     }
 }
 
-/// Replace C0 control bytes (`0x00`–`0x1f`, including ESC and newline/CR) and DEL
-/// (`0x7f`) with a visible `\xHH` form, so they cannot drive the terminal. Bytes
-/// `>= 0x80` (UTF-8 lead/continuation, or invalid bytes) are passed through so
-/// legitimate non-ASCII filenames still display.
+/// UTF-8 byte sequences for Unicode codepoints neutralized in human-facing
+/// output, beyond plain C0 control bytes: bidirectional **format** characters
+/// (the "Trojan Source" class — CVE-2021-42574 — which can reorder how text
+/// *displays* without changing the underlying bytes, e.g. making `cat\u{202e}gpj.txt`
+/// render as `cat` followed by what looks like `txt.jpg`) and common invisible /
+/// zero-width characters (can hide text, or make two different filenames render
+/// identically). Deliberately narrow: this does **not** attempt general
+/// homoglyph/confusable detection (e.g. Cyrillic vs Latin lookalikes) — that is a
+/// much larger, fuzzy problem with real false-positive risk for legitimate
+/// non-Latin filenames, and a script-mixing heuristic is a poor substitute for
+/// actually reading the bytes. Every entry here is exactly 3 bytes in UTF-8.
+const DANGEROUS_CODEPOINTS: &[(u32, &[u8])] = &[
+    (0x202a, &[0xe2, 0x80, 0xaa]), // LEFT-TO-RIGHT EMBEDDING
+    (0x202b, &[0xe2, 0x80, 0xab]), // RIGHT-TO-LEFT EMBEDDING
+    (0x202c, &[0xe2, 0x80, 0xac]), // POP DIRECTIONAL FORMATTING
+    (0x202d, &[0xe2, 0x80, 0xad]), // LEFT-TO-RIGHT OVERRIDE
+    (0x202e, &[0xe2, 0x80, 0xae]), // RIGHT-TO-LEFT OVERRIDE
+    (0x2066, &[0xe2, 0x81, 0xa6]), // LEFT-TO-RIGHT ISOLATE
+    (0x2067, &[0xe2, 0x81, 0xa7]), // RIGHT-TO-LEFT ISOLATE
+    (0x2068, &[0xe2, 0x81, 0xa8]), // FIRST STRONG ISOLATE
+    (0x2069, &[0xe2, 0x81, 0xa9]), // POP DIRECTIONAL ISOLATE
+    (0x200b, &[0xe2, 0x80, 0x8b]), // ZERO WIDTH SPACE
+    (0x200c, &[0xe2, 0x80, 0x8c]), // ZERO WIDTH NON-JOINER
+    (0x200d, &[0xe2, 0x80, 0x8d]), // ZERO WIDTH JOINER
+    (0x2060, &[0xe2, 0x81, 0xa0]), // WORD JOINER
+    (0xfeff, &[0xef, 0xbb, 0xbf]), // ZERO WIDTH NO-BREAK SPACE / BOM
+];
+
+/// Replace C0 control bytes (`0x00`–`0x1f`, including ESC and newline/CR), DEL
+/// (`0x7f`), and the [`DANGEROUS_CODEPOINTS`] above with a visible escaped form,
+/// so a crafted filename can neither drive the terminal nor spoof what's
+/// displayed. Other bytes `>= 0x80` (ordinary UTF-8, or invalid bytes) pass
+/// through unchanged so legitimate non-ASCII filenames still display.
 fn sanitize_controls(path: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(path.len());
-    for &b in path {
+    let mut i = 0;
+    while i < path.len() {
+        let b = path[i];
         if b < 0x20 || b == 0x7f {
             out.extend_from_slice(format!("\\x{b:02x}").as_bytes());
-        } else {
-            out.push(b);
+            i += 1;
+            continue;
         }
+        if let Some(&(cp, _)) = DANGEROUS_CODEPOINTS
+            .iter()
+            .find(|(_, seq)| path[i..].starts_with(seq))
+        {
+            out.extend_from_slice(format!("\\u{{{cp:04x}}}").as_bytes());
+            i += 3; // every denylisted sequence above is exactly 3 bytes in UTF-8
+            continue;
+        }
+        out.push(b);
+        i += 1;
     }
     out
 }
@@ -397,6 +438,44 @@ mod tests {
         assert!(!safe.contains(&0x1b), "ESC must be escaped");
         assert!(!safe.contains(&b'\r'), "CR must be escaped");
         assert_eq!(safe, b"evil\\x1b[31m\\x1b[2K\\x0dsafe.txt");
+    }
+
+    #[test]
+    fn sanitize_neutralizes_bidi_override_spoofing() {
+        // "Trojan Source" style: cat<RLO>txt.gpj<PDF> renders as cat + "jpg.txt"
+        // reversed, spoofing a .txt file as something else. Raw RLO/PDF bytes
+        // (e2 80 ae / e2 80 ac) were confirmed to pass through unescaped before
+        // this fix.
+        let evil = "cat\u{202e}txt.gpj\u{202c}".as_bytes();
+        let safe = sanitize_controls(evil);
+        assert!(
+            !safe.windows(3).any(|w| w == [0xe2, 0x80, 0xae]),
+            "RLO must not survive raw"
+        );
+        assert!(
+            !safe.windows(3).any(|w| w == [0xe2, 0x80, 0xac]),
+            "PDF must not survive raw"
+        );
+        assert_eq!(safe, b"cat\\u{202e}txt.gpj\\u{202c}");
+    }
+
+    #[test]
+    fn sanitize_neutralizes_invisible_characters() {
+        // Zero-width space can hide text or make two different names render
+        // identically (e.g. "secret" vs "se\u{200b}cret").
+        let evil = "se\u{200b}cret".as_bytes();
+        assert_eq!(sanitize_controls(evil), b"se\\u{200b}cret");
+        // BOM / zero-width no-break space.
+        assert_eq!(sanitize_controls("\u{feff}x".as_bytes()), b"\\u{feff}x");
+    }
+
+    #[test]
+    fn sanitize_does_not_mangle_ordinary_non_ascii() {
+        // A 3-byte UTF-8 sequence that is NOT in the denylist (e.g. é = U+00E9
+        // is 2 bytes; use a real 3-byte char, the EUR sign U+20AC) must pass
+        // through untouched, proving the matcher doesn't over-match by length.
+        let euro = "café-€100".as_bytes();
+        assert_eq!(sanitize_controls(euro), euro);
     }
 
     #[test]

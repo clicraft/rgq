@@ -296,9 +296,13 @@ go to **stderr** and do not change the exit code.
 
 `rgq` is safe Rust (no `unsafe`) and never invokes a shell — `rg` is spawned with a structured
 argument vector, search patterns go after `-e`, and paths after `--`, so neither a query term
-nor a filename can be misread as a flag. Filenames are attacker-influenceable, so control bytes
-in paths are **escaped when output goes to a terminal** (preventing ANSI escape-sequence
-spoofing); piped output stays raw and `--print0` is the safe form for machine consumption.
+nor a filename can be misread as a flag. Every invocation also passes `--no-config`, so an
+attacker-set `RIPGREP_CONFIG_PATH` cannot inject extra `rg` flags (notably `--pre <program>`,
+which would otherwise run an arbitrary command per file searched). Filenames are
+attacker-influenceable, so control bytes and Unicode bidi-override/invisible characters in paths
+are **escaped when output goes to a terminal** (preventing both ANSI escape-sequence spoofing and
+"Trojan Source"-style filename spoofing); piped output stays raw and `--print0` is the safe form
+for machine consumption.
 
 If you **embed** `rgq` and pass an untrusted query, always separate it with `--`
 (`rgq -- "$query"`) so the query can't smuggle `rgq`'s own flags (e.g. `-uu` to widen scope).
