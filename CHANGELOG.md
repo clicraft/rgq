@@ -15,6 +15,23 @@ with a date, add a fresh empty "Unreleased" section, and update the links at the
 
 _No unreleased changes._
 
+## [0.1.3] - 2026-07-01
+
+Pre-built release binaries are now available on the [Releases page](https://github.com/clicraft/rgq/releases) — a `vX.Y.Z` tag now builds and publishes them automatically.
+
+### Added
+
+- Statically-linked (musl) Linux release binaries for `x86_64` and `aarch64`, published as
+  `rgq-<version>-<target>.tar.gz` with a `.sha256` checksum, each bundling the binary,
+  `README.md`, and both license files.
+- `LICENSE-MIT` and `LICENSE-APACHE`. `Cargo.toml` has declared `license = "MIT OR Apache-2.0"`
+  since the initial release, but the actual license texts hadn't been added until now.
+
+### Changed
+
+- Release builds (`cargo build --release`, including the new published binaries) now strip debug
+  symbols (`[profile.release] strip = true`), producing a smaller binary. No behavior change.
+
 ## [0.1.2] - 2026-07-01
 
 A predictive memory-safety check for `--tree`, addressing a gap left by 0.1.1's depth cap: that
@@ -132,7 +149,8 @@ reports the set of files satisfying it, optionally rendered as a tree.
   `--` end-of-options marker, so neither a query term nor a filename can be misread as a flag. See
   [`SECURITY.md`](./SECURITY.md) for the full threat model.
 
-[Unreleased]: https://github.com/clicraft/rgq/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/clicraft/rgq/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/clicraft/rgq/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/clicraft/rgq/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/clicraft/rgq/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/clicraft/rgq/releases/tag/v0.1.0

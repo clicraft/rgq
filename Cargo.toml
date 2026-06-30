@@ -1,6 +1,6 @@
 [package]
 name = "rgq"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "A boolean-query (AND/OR/NOT) front end for ripgrep, with a built-in ASCII tree renderer."
 license = "MIT OR Apache-2.0"

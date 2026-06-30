@@ -82,7 +82,10 @@ jobs:
 
   build:
     name: build (${{ matrix.target }})
-    needs: test
+    # Both check-version and test, even though test itself depends on
+    # check-version — GitHub Actions only exposes needs.<job>.outputs.* for
+    # jobs listed directly in *this* job's own needs:, not transitively.
+    needs: [check-version, test]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
