@@ -1,5 +1,8 @@
 # rgq
 
+[![CI](https://github.com/clicraft/rgq/actions/workflows/ci.yml/badge.svg)](https://github.com/clicraft/rgq/actions/workflows/ci.yml)
+[![Security audit](https://github.com/clicraft/rgq/actions/workflows/audit.yml/badge.svg)](https://github.com/clicraft/rgq/actions/workflows/audit.yml)
+
 A boolean-query front end for [ripgrep](https://github.com/BurntSushi/ripgrep). You write a
 logical expression over search terms with `AND`, `OR`, `NOT`, and parentheses; `rgq` reports
 the **set of files** satisfying it, optionally rendered as an ASCII tree.

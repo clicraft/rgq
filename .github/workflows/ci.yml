@@ -1,0 +1,67 @@
+name: CI
+
+# rgq targets Linux only: it reads /proc/meminfo (src/membudget.rs), assumes
+# Linux PATH_MAX in the tree renderer's depth cap, and uses std::os::unix
+# throughout (OsStrExt, PermissionsExt) for byte-oriented paths. ubuntu-latest
+# is the only runner that makes sense here — not an oversight, see PLAN.md /
+# SECURITY.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    name: test (unit + black-box e2e against real rg)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # rgq's only runtime dependency is `rg` (spec §15): the black-box e2e
+      # suites (tests/engine.rs, tests/hardening.rs, tests/membudget.rs,
+      # tests/tree.rs) spawn the real compiled rgq binary, which in turn
+      # spawns a real `rg` — without it on PATH those suites fail outright,
+      # not just skip.
+      - name: Install ripgrep
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+      - name: Verify rg is on PATH
+        run: rg --version
+
+      - name: Build
+        run: cargo build --verbose
+      - name: Test
+        run: cargo test --verbose

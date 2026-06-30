@@ -1,0 +1,56 @@
+name: Security audit
+
+# cargo audit checks Cargo.lock against the live RustSec advisory database.
+# Two trigger families, both needed (see SECURITY.md #15):
+#   - push/PR when dependencies actually change: catches a vulnerable
+#     dependency *before* it merges.
+#   - a weekly schedule, independent of any code change: catches a new
+#     advisory published against a dependency that's already merged. A clean
+#     scan at merge time says nothing about a CVE disclosed next month
+#     against the same pinned version.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/audit.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+  schedule:
+    - cron: "0 6 * * 1" # every Monday 06:00 UTC
+  workflow_dispatch: # allow an on-demand re-scan from the Actions tab
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      # cargo-audit itself takes ~1-2 minutes to compile from source; cache
+      # the installed binary so only the first run (or a cache eviction)
+      # pays that cost. The advisory database is deliberately *not* cached —
+      # fetching it fresh every run is the entire point of the schedule.
+      - name: Cache cargo-audit binary
+        id: cache-audit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-bin-${{ runner.os }}
+
+      - name: Install cargo-audit (cache miss only)
+        if: steps.cache-audit.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --locked
+
+      - name: cargo audit
+        run: cargo audit

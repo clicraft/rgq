@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # Keeps Cargo.lock current so cargo-audit (.github/workflows/audit.yml) has
+  # fixed versions to upgrade to, not just a problem to report.
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Keeps the pinned GitHub Actions (actions/checkout, dtolnay/rust-toolchain,
+  # etc.) current too — an Action is also a supply-chain dependency.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

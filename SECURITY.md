@@ -226,15 +226,21 @@ reimplement search) and is noted there as a possible future direction. Documente
 "fixed" because no fix is possible without that larger architectural change; it requires local
 write access to the search target, which is already a high level of access.
 
-### 15. Supply chain: dependency vulnerabilities — *checked, clean*
+### 15. Supply chain: dependency vulnerabilities — *checked, clean; now automated*
 
 `rgq`'s dependency tree is small (`clap`, `thiserror`, plus their transitive deps — all
 widely-used, actively maintained crates; see `cargo tree`). `cargo audit` (RustSec advisory
 database, 1,146 advisories at time of scan) reports **zero vulnerabilities** across all 57
 resolved dependencies. This is a point-in-time result, not a guarantee — new advisories are
-published continuously. **Recommendation:** run `cargo audit` in CI on a schedule (not just at
-release time), since a clean scan today says nothing about a CVE disclosed next month against a
-crate already in the dependency tree.
+published continuously, so a clean scan today says nothing about a CVE disclosed next month
+against a crate already in the dependency tree.
+
+**Automated in CI** (`.github/workflows/audit.yml`): `cargo audit` now runs on every push/PR that
+touches `Cargo.toml`/`Cargo.lock`, *and* on a weekly schedule independent of any code change —
+the schedule is what catches a newly published advisory against an already-merged dependency,
+which a merge-time-only check would miss entirely. `.github/dependabot.yml` complements this with
+weekly automated PRs bumping outdated `cargo` and `github-actions` dependencies, so a flagged
+vulnerability usually already has a fix available to merge.
 
 ### 16. No predictive check against aggregate `--tree` memory use — *added*
 
