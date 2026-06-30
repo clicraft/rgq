@@ -1,0 +1,17 @@
+[package]
+name = "rgq"
+version = "0.1.0"
+edition = "2021"
+description = "A boolean-query (AND/OR/NOT) front end for ripgrep, with a built-in ASCII tree renderer."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/clicraft/rgq"
+readme = "README.md"
+keywords = ["ripgrep", "search", "boolean", "grep", "cli"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "rgq"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
