@@ -52,28 +52,64 @@ pub fn render<'a, I>(paths: I) -> Vec<u8>
 where
     I: IntoIterator<Item = &'a [u8]>,
 {
+    let root = build_trie(paths);
+    let mut out: Vec<u8> = Vec::new();
+    out.write_bytes(b".\n");
+    render_children(&root, b"", 0, &mut out);
+    out
+}
+
+fn build_trie<'a, I>(paths: I) -> Node
+where
+    I: IntoIterator<Item = &'a [u8]>,
+{
     let mut root = Node::default();
     for path in paths {
         root.insert(path);
     }
+    root
+}
 
-    let mut out = Vec::new();
-    out.extend_from_slice(b".\n");
-    render_children(&root, b"", 0, &mut out);
-    out
+/// Where rendered bytes go. Two implementations: [`Vec<u8>`] (the real output
+/// buffer) and [`ByteCounter`] (just tallies lengths). `render_children` is
+/// written once, generic over this trait, and used for *both* — so
+/// [`estimate_memory_bytes`]'s prediction of the output size can never silently
+/// drift from what `render` actually produces; they are, by construction, the
+/// same code path.
+trait Sink {
+    fn write_bytes(&mut self, bytes: &[u8]);
+}
+
+impl Sink for Vec<u8> {
+    fn write_bytes(&mut self, bytes: &[u8]) {
+        self.extend_from_slice(bytes);
+    }
+}
+
+/// A [`Sink`] that only counts bytes, allocating nothing for the content
+/// itself. Used to predict `render`'s output size without paying for it.
+#[derive(Default)]
+struct ByteCounter(u64);
+
+impl Sink for ByteCounter {
+    fn write_bytes(&mut self, bytes: &[u8]) {
+        self.0 += bytes.len() as u64;
+    }
 }
 
 /// Depth-first, pre-order render. `depth` counts levels already descended;
 /// reaching [`MAX_DEPTH`] truncates the remaining subtree with a visible marker
 /// instead of continuing to recurse, so a pathologically deep path bounds the
 /// work done (and is reported, not silently dropped) rather than risking a stack
-/// overflow.
-fn render_children(node: &Node, prefix: &[u8], depth: usize, out: &mut Vec<u8>) {
+/// overflow. Cloning `prefix` per level is safe now that depth is capped at
+/// [`MAX_DEPTH`] (at most ~400 bytes per clone, ~100 levels — see SECURITY.md
+/// for why this used to matter a great deal more).
+fn render_children<S: Sink>(node: &Node, prefix: &[u8], depth: usize, out: &mut S) {
     if depth >= MAX_DEPTH {
         if !node.children.is_empty() {
-            out.extend_from_slice(prefix);
-            out.extend_from_slice(ELBOW);
-            out.extend_from_slice(
+            out.write_bytes(prefix);
+            out.write_bytes(ELBOW);
+            out.write_bytes(
                 format!("... (truncated: nested past {MAX_DEPTH} levels)\n").as_bytes(),
             );
         }
@@ -84,15 +120,83 @@ fn render_children(node: &Node, prefix: &[u8], depth: usize, out: &mut Vec<u8>) 
     for (i, (name, child)) in node.children.iter().enumerate() {
         let is_last = i == last_index;
 
-        out.extend_from_slice(prefix);
-        out.extend_from_slice(if is_last { ELBOW } else { TEE });
-        out.extend_from_slice(name);
-        out.push(b'\n');
+        out.write_bytes(prefix);
+        out.write_bytes(if is_last { ELBOW } else { TEE });
+        out.write_bytes(name);
+        out.write_bytes(b"\n");
 
         let mut child_prefix = prefix.to_vec();
         child_prefix.extend_from_slice(if is_last { GAP } else { PIPE });
         render_children(child, &child_prefix, depth + 1, out);
     }
+}
+
+/// Conservative, rough per-trie-node memory overhead: the `Vec<u8>` key
+/// struct, the `Node`/`BTreeMap` value struct, and B-tree bookkeeping /
+/// allocator padding. Not a precise measurement — deliberately generous, so
+/// the safety check ([`crate::membudget`]) errs toward refusing rather than
+/// under-predicting.
+const TRIE_NODE_OVERHEAD_BYTES: u64 = 128;
+
+/// Predicted peak memory [`render`] would need for `paths`: the trie's own
+/// footprint (kept alive for the whole call) plus the rendered output buffer.
+/// Cheap and safe to compute — bounded by the same [`MAX_DEPTH`] recursion as
+/// `render` itself — so it can run *before* deciding whether to render at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryEstimate {
+    /// Exact predicted length of `render`'s output: computed by running the
+    /// identical traversal against a [`ByteCounter`] sink instead of an
+    /// accumulating buffer, so this is provably equal to `render(paths).len()`,
+    /// not an approximation.
+    pub output_bytes: u64,
+    /// Rough estimate of the trie's own memory footprint while rendering.
+    pub trie_bytes: u64,
+}
+
+impl MemoryEstimate {
+    pub fn total(&self) -> u64 {
+        self.output_bytes.saturating_add(self.trie_bytes)
+    }
+}
+
+/// Estimate the memory `render(paths)` would need, without doing the
+/// (potentially large) work of actually rendering.
+pub fn estimate_memory_bytes<'a, I>(paths: I) -> MemoryEstimate
+where
+    I: IntoIterator<Item = &'a [u8]>,
+{
+    let root = build_trie(paths);
+
+    let mut counter = ByteCounter::default();
+    counter.write_bytes(b".\n");
+    render_children(&root, b"", 0, &mut counter);
+
+    let (node_count, component_bytes) = trie_footprint(&root, 0);
+
+    MemoryEstimate {
+        output_bytes: counter.0,
+        trie_bytes: node_count
+            .saturating_mul(TRIE_NODE_OVERHEAD_BYTES)
+            .saturating_add(component_bytes),
+    }
+}
+
+/// Bounded recursive walk (same [`MAX_DEPTH`] guard as `render_children`)
+/// tallying the trie's real, deduplicated `(node_count, component_bytes)`.
+fn trie_footprint(node: &Node, depth: usize) -> (u64, u64) {
+    if depth >= MAX_DEPTH {
+        return (0, 0);
+    }
+    let mut nodes = 0u64;
+    let mut bytes = 0u64;
+    for (name, child) in &node.children {
+        nodes += 1;
+        bytes += name.len() as u64;
+        let (n, b) = trie_footprint(child, depth + 1);
+        nodes += n;
+        bytes += b;
+    }
+    (nodes, bytes)
 }
 
 #[cfg(test)]
@@ -240,5 +344,81 @@ mod tests {
             render_strs(&["my dir/file.txt"]),
             ".\n└── my dir\n    └── file.txt\n"
         );
+    }
+
+    // ---- estimate_memory_bytes: the predictive memory-safety check ----
+
+    #[test]
+    fn estimate_output_bytes_exactly_matches_real_render_length() {
+        let paths: Vec<Vec<u8>> = [
+            "README.md",
+            "src/a/main.py",
+            "src/a/util.py",
+            "src/b/test.py",
+        ]
+        .iter()
+        .map(|s| s.as_bytes().to_vec())
+        .collect();
+        let rendered = render(paths.iter().map(Vec::as_slice));
+        let estimate = estimate_memory_bytes(paths.iter().map(Vec::as_slice));
+        assert_eq!(
+            estimate.output_bytes,
+            rendered.len() as u64,
+            "the estimate must be exact, not approximate — it's the same traversal"
+        );
+    }
+
+    #[test]
+    fn estimate_output_bytes_exactly_matches_with_truncation() {
+        // Same property, but exercising the MAX_DEPTH truncation-marker branch.
+        let path = deep_path(MAX_DEPTH + 5);
+        let rendered = render(std::iter::once(path.as_slice()));
+        let estimate = estimate_memory_bytes(std::iter::once(path.as_slice()));
+        assert_eq!(estimate.output_bytes, rendered.len() as u64);
+    }
+
+    #[test]
+    fn estimate_is_exact_for_shuffled_and_shared_prefix_inputs() {
+        // A case with real prefix sharing (deduplication matters): two paths
+        // share "src/a/".
+        let paths: Vec<Vec<u8>> = ["src/a/one.txt", "src/a/two.txt", "src/b.txt"]
+            .iter()
+            .map(|s| s.as_bytes().to_vec())
+            .collect();
+        let rendered = render(paths.iter().map(Vec::as_slice));
+        let estimate = estimate_memory_bytes(paths.iter().map(Vec::as_slice));
+        assert_eq!(estimate.output_bytes, rendered.len() as u64);
+    }
+
+    #[test]
+    fn estimate_trie_bytes_is_positive_for_nonempty_input_and_total_sums_correctly() {
+        let estimate = estimate_memory_bytes(std::iter::once(b"a/b/c.txt".as_slice()));
+        assert!(
+            estimate.trie_bytes > 0,
+            "a non-empty trie must have a positive footprint estimate"
+        );
+        assert_eq!(
+            estimate.total(),
+            estimate.output_bytes + estimate.trie_bytes
+        );
+    }
+
+    #[test]
+    fn estimate_for_empty_input_is_just_the_root_line() {
+        let estimate = estimate_memory_bytes(std::iter::empty());
+        assert_eq!(estimate.output_bytes, 2); // ".\n"
+        assert_eq!(estimate.trie_bytes, 0);
+    }
+
+    #[test]
+    fn estimate_grows_with_more_distinct_unshared_paths() {
+        // More files with no shared structure must predict more memory than
+        // fewer — a basic monotonicity sanity check on the estimator.
+        let few = estimate_memory_bytes(std::iter::once(b"a.txt".as_slice()));
+        let many: Vec<Vec<u8>> = (0..50)
+            .map(|i| format!("file{i}.txt").into_bytes())
+            .collect();
+        let many_estimate = estimate_memory_bytes(many.iter().map(Vec::as_slice));
+        assert!(many_estimate.total() > few.total());
     }
 }

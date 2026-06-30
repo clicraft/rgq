@@ -174,6 +174,7 @@ The default (no output flag) prints one path per line, sorted.
 | Flag | Argument | Default | Description |
 |------|----------|---------|-------------|
 | `--max-clauses` | `<N>` | `1024` | Maximum clauses a query may expand to in disjunctive normal form. Guards against the combinatorial blow-up of DNF — e.g. `(a OR b) AND (c OR d) AND (e OR f)` is 8 clauses; deeply nested OR-of-ANDs can explode. Exceeding the cap is a clear error (exit 2), not an out-of-memory crash. |
+| `--min-free-mem-pct` | `<PCT>` | `20` | Before rendering `--tree` (whose output can exceed the matched file set in size), `rgq` predicts the memory it would need and compares it against real system memory, refusing rather than letting that prediction eat into this percentage of *total* system memory. Doesn't apply to the default list / `--print0`, which don't build the tree's index structure. |
 
 ### Information
 
@@ -255,7 +256,7 @@ unsatisfiable: every clause is self-contradictory — matches no files
 | Code | Meaning |
 |------|---------|
 | `0` | Success — including **zero matches** and an **unsatisfiable** query (these are not errors) |
-| `2` | Usage error — empty query, parse/lex error (dangling operator, unbalanced parenthesis, unterminated quote, adjacency), unknown flag, conflicting flags, or `--max-clauses` exceeded |
+| `2` | Usage error — empty query, parse/lex error (dangling operator, unbalanced parenthesis, unterminated quote, adjacency), unknown flag, conflicting flags, `--max-clauses` exceeded, or the `--min-free-mem-pct` memory budget would be exceeded |
 | non-zero (`1`) | Runtime error — `rg` not found or `rg` failed (e.g. an invalid-regex term) |
 
 Warnings (such as a positive-free clause like `NOT cat`, which must scan every file in scope)
@@ -269,6 +270,7 @@ go to **stderr** and do not change the exit code.
 |----------|--------|
 | `RGQ_RG` | Path to the `rg` binary to use instead of resolving `rg` from `PATH`. |
 | `RGQ_ARG_MAX` | Override the per-invocation argv byte budget used when batching large candidate lists (default ~128 KiB). Mainly a testing/tuning hook. |
+| `RGQ_MEM_AVAILABLE_BYTES`, `RGQ_MEM_TOTAL_BYTES` | Set **both** to override the `--min-free-mem-pct` check's view of system memory instead of reading `/proc/meminfo`. Useful inside a memory-limited container, where `/proc/meminfo` reports the host's memory, not the container's actual limit. |
 
 ---
 
@@ -289,6 +291,10 @@ go to **stderr** and do not change the exit code.
   behavior). `rgq` mirrors `rg`'s universe exactly, so results stay internally consistent.
 - **Paths are bytes.** Non-UTF-8 and newline-containing filenames are handled correctly; use
   `--print0` when paths might contain newlines.
+- **`--tree` can refuse on a huge result set.** It predicts the memory it would need before
+  rendering and won't proceed if that would leave less than `--min-free-mem-pct` (default 20%) of
+  system memory free. Use the default list or `--print0` for very large result sets — they write
+  each path once, with no amplification, so the check doesn't apply to them.
 
 ---
 
@@ -302,7 +308,8 @@ which would otherwise run an arbitrary command per file searched). Filenames are
 attacker-influenceable, so control bytes and Unicode bidi-override/invisible characters in paths
 are **escaped when output goes to a terminal** (preventing both ANSI escape-sequence spoofing and
 "Trojan Source"-style filename spoofing); piped output stays raw and `--print0` is the safe form
-for machine consumption.
+for machine consumption. `--tree` predicts its memory use before rendering and refuses rather
+than risk exhausting memory on a very large result set (`--min-free-mem-pct`, default 20%).
 
 If you **embed** `rgq` and pass an untrusted query, always separate it with `--`
 (`rgq -- "$query"`) so the query can't smuggle `rgq`'s own flags (e.g. `-uu` to widen scope).

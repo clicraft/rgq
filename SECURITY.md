@@ -44,6 +44,7 @@ daemon; it runs with exactly the privileges of the user who launched it.
 | 13 | Tree renderer: unbounded path depth (stack overflow) | Medium | **Fixed** |
 | 14 | TOCTOU symlink race between candidate listing and narrowing | Low | **Documented (inherent)** |
 | 15 | Supply-chain: dependency vulnerabilities | — | **Checked: clean** |
+| 16 | No predictive check against *aggregate* `--tree` memory use (many large/deep files) | Low | **Added** |
 
 ### 1. Terminal escape-sequence injection via filenames — *fixed*
 
@@ -235,6 +236,29 @@ published continuously. **Recommendation:** run `cargo audit` in CI on a schedul
 release time), since a clean scan today says nothing about a CVE disclosed next month against a
 crate already in the dependency tree.
 
+### 16. No predictive check against aggregate `--tree` memory use — *added*
+
+Finding 13's `MAX_DEPTH` cap bounds the cost *per matched file* but not the *number* of matched
+files: a query with very broad scope flags (`-uu` over a huge tree) and a permissive term could
+match enough files, each individually near the depth cap, to add up to a large amount of memory
+during `--tree` rendering — even though no single path is unbounded anymore.
+
+**Mitigation.** Before rendering, `rgq` now computes an exact prediction of the rendered output
+size and a conservative estimate of the trie's own memory footprint (`tree::estimate_memory_bytes`
+— the output-size estimate is *exact*, not approximate: it runs the identical traversal `render`
+itself uses, against a byte-counting sink instead of an accumulating buffer, so the two can never
+silently drift apart), checks that against the system's real available memory (`/proc/meminfo`,
+via `src/membudget.rs`), and refuses with a clear, actionable error rather than risk exhausting
+memory — by default never letting estimated usage push *total* free system memory below **20%**
+(configurable: `--min-free-mem-pct`). The check is scoped to `--tree`, the one output mode whose
+memory footprint can exceed the size of its input; the default list and `--print0` modes write
+each matched path once with no amplification and don't need it.
+
+**Limitation:** the check reads host-level `/proc/meminfo`, so inside a memory-limited container
+(e.g. `docker run --memory=512m`) it sees the host's full memory, not the cgroup limit, and would
+not catch an OOM kill imposed by a tighter container limit. If memory introspection is unavailable
+at all (non-Linux, sandboxed), `rgq` warns and proceeds rather than refusing to run.
+
 ---
 
 ## Residual risks & operator guidance
@@ -257,6 +281,10 @@ crate already in the dependency tree.
 - **The TOCTOU race in finding 14** means a result set is a snapshot, not a guarantee — if the
   search target is being concurrently modified by an untrusted party, don't treat `rgq`'s output
   as proof of what those files currently contain.
+- **The `--tree` memory check (finding 16) sees host memory, not container limits.** If you run
+  `rgq` inside a memory-limited container, set `--min-free-mem-pct` conservatively (or use
+  `RGQ_MEM_AVAILABLE_BYTES`/`RGQ_MEM_TOTAL_BYTES` to supply the real cgroup limit), since
+  `/proc/meminfo` alone won't reflect it.
 
 ## Reporting
 

@@ -20,7 +20,7 @@ use std::process::ExitCode;
 use clap::{ArgAction, Parser};
 
 use crate::ast::Normalized;
-use crate::{engine, explain, lexer, normalize, parser, rg, tree};
+use crate::{engine, explain, lexer, membudget, normalize, parser, rg, tree};
 
 const ABOUT: &str = "A boolean-query front end for ripgrep: combine terms with AND, OR, NOT \
 and parentheses; rgq reports the set of files satisfying the expression, optionally as a tree.";
@@ -106,6 +106,19 @@ pub struct Cli {
     )]
     max_clauses: usize,
 
+    /// Minimum percentage of total system memory to always keep free. Before
+    /// rendering --tree (whose output can exceed the matched file set in size),
+    /// rgq predicts the memory it would need and refuses rather than risk this
+    /// margin if the prediction would eat into it.
+    #[arg(
+        long = "min-free-mem-pct",
+        value_name = "PCT",
+        default_value_t = 20,
+        value_parser = clap::value_parser!(u8).range(0..=100),
+        help_heading = "Limits"
+    )]
+    min_free_mem_pct: u8,
+
     // ---- the query ----
     /// Boolean query, e.g. '(cat OR dog) AND NOT bird'. Several words are joined with spaces.
     #[arg(value_name = "QUERY")]
@@ -154,6 +167,7 @@ pub struct Config {
     pub output: OutputMode,
     pub explain: bool,
     pub max_clauses: usize,
+    pub min_free_mem_pct: u8,
 }
 
 impl Cli {
@@ -200,6 +214,7 @@ impl Cli {
             output,
             explain: self.explain,
             max_clauses: self.max_clauses,
+            min_free_mem_pct: self.min_free_mem_pct,
         })
     }
 }
@@ -304,6 +319,28 @@ fn dispatch(config: &Config) -> ExitCode {
 
     for warning in &outcome.warnings {
         eprintln!("rgq: warning: {warning}");
+    }
+
+    // --tree's output can exceed the matched file set in size (per-line prefix
+    // overhead, §10), unlike List/Print0 which write each path once with no
+    // amplification. Predict the memory it would need before committing to it,
+    // and refuse cleanly rather than risk exhausting memory (spec: keep
+    // min_free_mem_pct of total system memory free, always).
+    if config.output == OutputMode::Tree {
+        let estimate = tree::estimate_memory_bytes(outcome.files.iter().map(Vec::as_slice));
+        match membudget::check(estimate.total(), config.min_free_mem_pct) {
+            membudget::CheckResult::Proceed => {}
+            membudget::CheckResult::Unknown => {
+                eprintln!(
+                    "rgq: warning: could not determine available system memory; \
+                     proceeding without a memory safety check"
+                );
+            }
+            membudget::CheckResult::Refuse(err) => {
+                eprintln!("rgq: {err}");
+                return ExitCode::from(2);
+            }
+        }
     }
 
     if let Err(err) = emit(&outcome.files, config.output) {

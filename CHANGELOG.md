@@ -15,6 +15,38 @@ with a date, add a fresh empty "Unreleased" section, and update the links at the
 
 _No unreleased changes._
 
+## [0.1.2] - 2026-07-01
+
+A predictive memory-safety check for `--tree`, addressing a gap left by 0.1.1's depth cap: that
+cap bounds the cost *per matched file*, but not the *number* of matched files, so a broad-scope
+query could still add up to a large rendering cost even with no single path unbounded.
+
+### Added
+
+- **`--min-free-mem-pct <PCT>` (default 20).** Before rendering `--tree`, `rgq` now predicts the
+  memory it would need and checks that against real system memory (`/proc/meminfo`), refusing
+  with a clear error (exit 2) rather than risking exhaustion, if proceeding would leave less than
+  this percentage of *total* system memory free. The prediction for the rendered-output portion is
+  exact, not approximate: it's computed by running the identical traversal `--tree` itself uses,
+  against a byte-counting sink instead of an accumulating buffer, so the estimate can't silently
+  drift from what actually gets rendered.
+- Only `--tree` is affected — the default list and `--print0` write each matched path once with no
+  size amplification and don't need the check.
+- `RGQ_MEM_AVAILABLE_BYTES` / `RGQ_MEM_TOTAL_BYTES` env vars (both must be set) override the
+  memory-check inputs — useful inside a memory-limited container, where `/proc/meminfo` reports
+  host memory rather than the container's actual limit (a documented residual limitation).
+
+### Tests
+
+- `src/membudget.rs`: meminfo parsing and the proceed/refuse decision, including exact boundary
+  cases (the budget is inclusive of using exactly the allowed amount).
+- `src/tree.rs`: the output-size estimate is asserted *exactly* equal to `render(...).len()` across
+  several fixtures, including one exercising the depth-cap truncation marker and one with real
+  shared-prefix deduplication.
+- `tests/membudget.rs`: end-to-end, using the env var overrides for full determinism — refuses
+  under fake near-zero memory, proceeds under fake abundant memory, the flag relaxes/tightens the
+  margin, non-tree output modes are unaffected, and real `/proc/meminfo` works for ordinary runs.
+
 ## [0.1.1] - 2026-07-01
 
 A second security review, focused on the attack classes a CLI search tool that spawns a
@@ -100,6 +132,7 @@ reports the set of files satisfying it, optionally rendered as a tree.
   `--` end-of-options marker, so neither a query term nor a filename can be misread as a flag. See
   [`SECURITY.md`](./SECURITY.md) for the full threat model.
 
-[Unreleased]: https://github.com/clicraft/rgq/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/clicraft/rgq/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/clicraft/rgq/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/clicraft/rgq/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/clicraft/rgq/releases/tag/v0.1.0

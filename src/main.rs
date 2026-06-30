@@ -19,6 +19,7 @@ mod cli;
 mod engine;
 mod explain;
 mod lexer;
+mod membudget;
 mod normalize;
 mod parser;
 mod rg;
