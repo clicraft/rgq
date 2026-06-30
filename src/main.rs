@@ -14,7 +14,10 @@
 
 use std::process::ExitCode;
 
+mod ast;
 mod cli;
+mod lexer;
+mod parser;
 
 fn main() -> ExitCode {
     cli::run()

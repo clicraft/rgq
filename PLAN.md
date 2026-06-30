@@ -5,8 +5,9 @@ specification). The spec is the source of truth for **what** to build; this docu
 is the source of truth for **how and in what order** to build it. Section references
 (§) point back to the spec.
 
-Status: **M1 done** (CLI skeleton: arg parsing, match-vs-scope classification, exit
-codes; 20 tests green). Next up: M2 (lexer + parser + AST).
+Status: **M2 done** (lexer + parser + AST; early `--explain` of the parsed form; real
+exit-2 parse errors; 62 tests green). Next up: M3 (NNF + DNF + cleaning + golden
+`--explain`).
 
 ---
 

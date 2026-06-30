@@ -53,3 +53,48 @@ fn tree_and_print0_conflict_exits_2() {
     let out = rgq(&["--tree", "--print0", "cat"]);
     assert_eq!(out.status.code(), Some(2));
 }
+
+// ---- M2: parse/lex errors are usage errors (exit 2, spec §12) ----
+
+#[test]
+fn adjacency_is_a_parse_error() {
+    // Two terms with no operator between them: no implicit AND.
+    let out = rgq(&["cat dog"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no implicit AND"));
+}
+
+#[test]
+fn dangling_operator_is_a_parse_error() {
+    assert_eq!(rgq(&["cat AND"]).status.code(), Some(2));
+    assert_eq!(rgq(&["AND cat"]).status.code(), Some(2));
+}
+
+#[test]
+fn unbalanced_paren_is_a_parse_error() {
+    assert_eq!(rgq(&["(cat"]).status.code(), Some(2));
+}
+
+#[test]
+fn unterminated_quote_is_a_parse_error() {
+    let out = rgq(&["\"cat AND dog"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unterminated"));
+}
+
+#[test]
+fn explain_prints_parsed_query_and_exits_0() {
+    let out = rgq(&["--explain", "(cat AND dog) OR bird"]);
+    assert!(out.status.success(), "--explain should exit 0");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // Parsed form is fully parenthesized by precedence.
+    assert!(stdout.contains("(cat AND dog) OR bird"), "got: {stdout}");
+}
+
+#[test]
+fn explain_does_not_run_on_a_quoted_keyword() {
+    // '"AND"' is a literal term, so the query is well-formed (a single term).
+    let out = rgq(&["--explain", "\"AND\" OR cat"]);
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("AND OR cat"));
+}

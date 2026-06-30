@@ -17,6 +17,8 @@ use std::process::ExitCode;
 
 use clap::{ArgAction, Parser};
 
+use crate::{lexer, parser};
+
 const ABOUT: &str = "A boolean-query front end for ripgrep: combine terms with AND, OR, NOT \
 and parentheses; rgq reports the set of files satisfying the expression, optionally as a tree.";
 
@@ -226,18 +228,38 @@ fn report_clap_error(err: clap::Error) -> ExitCode {
 
 /// Act on a validated [`Config`].
 ///
-/// M1 skeleton: the front end and engine are not built yet, so this reports the
-/// classified configuration and exits non-zero rather than pretending to search.
-/// Later milestones replace the body with real lexing/parsing/execution.
+/// M2: the query is lexed and parsed, so malformed queries are reported as usage
+/// errors (exit 2, spec §12) and `--explain` shows the parsed expression.
+/// Normalization (M3) and execution (M4) are not built yet; until then a runnable
+/// query reports the parsed form and exits non-zero rather than pretending to
+/// search.
 fn dispatch(config: &Config) -> ExitCode {
-    eprintln!(
-        "rgq: arguments parsed, but query execution is not implemented yet \
-         (milestone M1 — CLI skeleton)."
-    );
-    eprintln!("  query:  {:?}", config.query);
-    eprintln!("  match:  {:?}", config.match_flags);
-    eprintln!("  scope:  {:?}", config.scope_flags);
-    eprintln!("  output: {:?}   explain: {}", config.output, config.explain);
+    let tokens = match lexer::lex(&config.query) {
+        Ok(tokens) => tokens,
+        Err(err) => {
+            eprintln!("rgq: {err}");
+            return ExitCode::from(2);
+        }
+    };
+
+    let ast = match parser::parse(&tokens) {
+        Ok(ast) => ast,
+        Err(err) => {
+            eprintln!("rgq: {err}");
+            return ExitCode::from(2);
+        }
+    };
+
+    if config.explain {
+        // M2 explain: the parsed expression. The normalized clause list and the
+        // execution plan (and the golden tests over them) arrive in M3.
+        println!("parsed query: {ast}");
+        eprintln!("note: normalized clauses and the execution plan are not implemented yet (milestone M3)");
+        return ExitCode::SUCCESS;
+    }
+
+    eprintln!("rgq: query parsed OK, but execution is not implemented yet (milestone M4).");
+    eprintln!("  parsed query: {ast}");
     ExitCode::FAILURE
 }
 
