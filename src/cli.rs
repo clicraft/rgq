@@ -13,12 +13,14 @@
 //! Getting that split right is a correctness requirement, not a nicety, so it is
 //! modelled in the type system rather than passed around as a loose bag of bools.
 
+use std::collections::BTreeSet;
+use std::io::{self, Write};
 use std::process::ExitCode;
 
 use clap::{ArgAction, Parser};
 
 use crate::ast::Normalized;
-use crate::{explain, lexer, normalize, parser};
+use crate::{engine, explain, lexer, normalize, parser, rg};
 
 const ABOUT: &str = "A boolean-query front end for ripgrep: combine terms with AND, OR, NOT \
 and parentheses; rgq reports the set of files satisfying the expression, optionally as a tree.";
@@ -273,14 +275,68 @@ fn dispatch(config: &Config) -> ExitCode {
     }
 
     // An unsatisfiable query needs no search: report and succeed (spec §12).
-    if matches!(normalized, Normalized::Unsatisfiable) {
-        eprintln!("rgq: query is unsatisfiable (every clause is self-contradictory); it matches no files");
-        return ExitCode::SUCCESS;
+    let clauses = match normalized {
+        Normalized::Unsatisfiable => {
+            eprintln!("rgq: query is unsatisfiable (every clause is self-contradictory); it matches no files");
+            return ExitCode::SUCCESS;
+        }
+        Normalized::Clauses(clauses) => clauses,
+    };
+
+    let rg = rg::Rg::new(&config.match_flags, &config.scope_flags);
+    let outcome = match engine::run(&clauses, &rg) {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            eprintln!("rgq: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    for warning in &outcome.warnings {
+        eprintln!("rgq: warning: {warning}");
     }
 
-    eprintln!("rgq: query parsed and normalized OK, but execution is not implemented yet (milestone M4).");
-    eprintln!("  parsed query: {ast}");
-    ExitCode::FAILURE
+    if let Err(err) = emit(&outcome.files, config.output) {
+        // A broken pipe (e.g. `| head`) is a normal, quiet exit.
+        if err.kind() == io::ErrorKind::BrokenPipe {
+            return ExitCode::SUCCESS;
+        }
+        eprintln!("rgq: error writing output: {err}");
+        return ExitCode::FAILURE;
+    }
+
+    ExitCode::SUCCESS
+}
+
+/// Write the final path set in the requested output mode (spec §9). Paths are
+/// written as raw bytes (byte-oriented, spec §2.2); `--print0` is the form that is
+/// also correct for paths containing newlines.
+fn emit(files: &BTreeSet<Vec<u8>>, mode: OutputMode) -> io::Result<()> {
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    match mode {
+        OutputMode::List => {
+            for path in files {
+                out.write_all(path)?;
+                out.write_all(b"\n")?;
+            }
+        }
+        OutputMode::Print0 => {
+            for path in files {
+                out.write_all(path)?;
+                out.write_all(b"\0")?;
+            }
+        }
+        OutputMode::Tree => {
+            // Wired up in M5; until then, fall back to a flat list.
+            eprintln!("rgq: note: --tree rendering lands in M5; showing a flat list");
+            for path in files {
+                out.write_all(path)?;
+                out.write_all(b"\n")?;
+            }
+        }
+    }
+    out.flush()
 }
 
 #[cfg(test)]

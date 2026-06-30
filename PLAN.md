@@ -5,9 +5,10 @@ specification). The spec is the source of truth for **what** to build; this docu
 is the source of truth for **how and in what order** to build it. Section references
 (§) point back to the spec.
 
-Status: **M3 done** (NNF + DNF + cleaning; `--max-clauses` cap; full `--explain` with
-plan; unsatisfiable handled; proptest equivalence keystone + 8 golden outputs; 89 tests
-green). Next up: M4 (engine: spawn rg, per-clause narrowing, list output).
+Status: **M4 done** (engine: rg wrapper, per-clause narrowing, batching, list +
+print0 output, scope/match flag propagation; 26 black-box e2e tests incl. scope
+consistency, empty-candidate short-circuit, ARG_MAX batching, rg-not-found; 123 tests
+green). Next up: M5 (tree renderer + `--tree`).
 
 ---
 

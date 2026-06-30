@@ -228,7 +228,11 @@ pkg/i.py}` — `.ignore`, `.secret.txt` (hidden) and `build.log` (ignored) are e
 | `-t py 'import'` | `pkg/h.py, pkg/i.py` |
 | `-t py 'import AND NOT __future__'` | `pkg/h.py` |
 | `-g '*.md' 'TODO'` | `sub/g.md` |
-| `-t txt 'NOT bird'` | `a.txt, b.txt, c.txt` |
+| `-t txt 'NOT bird'` | `.secret.txt, a.txt, b.txt, c.txt` † |
+
+† A `-t txt` type filter overrides ripgrep's default hidden-exclusion for matching
+dotfiles, so `.secret.txt` is in the `-t txt` universe (verified). `rgq` mirrors `rg`'s
+universe exactly (§7), so `NOT bird` keeps it; the scope-consistency test confirms it.
 
 **Scope-consistency assertion (spec §7):** for any term `t`, the result of `NOT t` must
 equal `(rg --files under the same scope) \ (result of t under the same scope)`. The test

@@ -16,10 +16,12 @@ use std::process::ExitCode;
 
 mod ast;
 mod cli;
+mod engine;
 mod explain;
 mod lexer;
 mod normalize;
 mod parser;
+mod rg;
 
 fn main() -> ExitCode {
     cli::run()
