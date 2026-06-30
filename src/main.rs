@@ -22,6 +22,7 @@ mod lexer;
 mod normalize;
 mod parser;
 mod rg;
+mod tree;
 
 fn main() -> ExitCode {
     cli::run()

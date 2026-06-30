@@ -5,7 +5,7 @@ specification). The spec is the source of truth for **what** to build; this docu
 is the source of truth for **how and in what order** to build it. Section references
 (§) point back to the spec.
 
-Status: **M4 done** (engine: rg wrapper, per-clause narrowing, batching, list +
+Status: **M5 done** (internal ASCII tree renderer; `--tree` wired; exact §10.4 golden + out-of-order + non-UTF-8 cases; 132 tests green). Next up: M6 (hardening: leading-dash, non-UTF8/newline paths, exit-code audit).
 print0 output, scope/match flag propagation; 26 black-box e2e tests incl. scope
 consistency, empty-candidate short-circuit, ARG_MAX batching, rg-not-found; 123 tests
 green). Next up: M5 (tree renderer + `--tree`).

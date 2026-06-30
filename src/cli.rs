@@ -20,7 +20,7 @@ use std::process::ExitCode;
 use clap::{ArgAction, Parser};
 
 use crate::ast::Normalized;
-use crate::{engine, explain, lexer, normalize, parser, rg};
+use crate::{engine, explain, lexer, normalize, parser, rg, tree};
 
 const ABOUT: &str = "A boolean-query front end for ripgrep: combine terms with AND, OR, NOT \
 and parentheses; rgq reports the set of files satisfying the expression, optionally as a tree.";
@@ -328,12 +328,7 @@ fn emit(files: &BTreeSet<Vec<u8>>, mode: OutputMode) -> io::Result<()> {
             }
         }
         OutputMode::Tree => {
-            // Wired up in M5; until then, fall back to a flat list.
-            eprintln!("rgq: note: --tree rendering lands in M5; showing a flat list");
-            for path in files {
-                out.write_all(path)?;
-                out.write_all(b"\n")?;
-            }
+            out.write_all(&tree::render(files.iter().map(Vec::as_slice)))?;
         }
     }
     out.flush()
