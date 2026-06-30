@@ -97,10 +97,16 @@ pub struct Literal {
 
 impl Literal {
     pub fn positive(term: Vec<u8>) -> Literal {
-        Literal { term, negated: false }
+        Literal {
+            term,
+            negated: false,
+        }
     }
     pub fn negative(term: Vec<u8>) -> Literal {
-        Literal { term, negated: true }
+        Literal {
+            term,
+            negated: true,
+        }
     }
 }
 
@@ -162,7 +168,10 @@ mod tests {
             Ast::not(Ast::or(Ast::term("a"), Ast::term("b"))).to_string(),
             "NOT (a OR b)"
         );
-        assert_eq!(Ast::not(Ast::not(Ast::term("cat"))).to_string(), "NOT (NOT cat)");
+        assert_eq!(
+            Ast::not(Ast::not(Ast::term("cat"))).to_string(),
+            "NOT (NOT cat)"
+        );
     }
 
     #[test]

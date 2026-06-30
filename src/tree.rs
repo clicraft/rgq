@@ -92,14 +92,24 @@ mod tests {
 
     #[test]
     fn t1_matches_spec_10_4_golden() {
-        let out = render_strs(&["README.md", "src/a/main.py", "src/a/util.py", "src/b/test.py"]);
+        let out = render_strs(&[
+            "README.md",
+            "src/a/main.py",
+            "src/a/util.py",
+            "src/b/test.py",
+        ]);
         assert_eq!(out, GOLDEN);
     }
 
     #[test]
     fn t2_out_of_order_input_renders_sorted() {
         // Same paths, shuffled — must produce byte-identical output.
-        let out = render_strs(&["src/b/test.py", "src/a/util.py", "README.md", "src/a/main.py"]);
+        let out = render_strs(&[
+            "src/b/test.py",
+            "src/a/util.py",
+            "README.md",
+            "src/a/main.py",
+        ]);
         assert_eq!(out, GOLDEN);
     }
 
@@ -129,24 +139,19 @@ mod tests {
 
     #[test]
     fn t7_non_utf8_component_does_not_panic() {
-        let weird = vec![b"dir".to_vec(), {
-            let mut v = b"inv".to_vec();
-            v.push(0xFF); // invalid UTF-8 byte
-            v.extend_from_slice(b".bin");
-            v
-        }];
-        // Build "dir/inv\xFF.bin" as a single path.
-        let mut path = weird[0].clone();
-        path.push(b'/');
-        path.extend_from_slice(&weird[1]);
-        let bytes = render(std::iter::once(path.as_slice()));
+        // Path "dir/inv\xFF.bin" — the 0xFF byte is not valid UTF-8.
+        let path: &[u8] = b"dir/inv\xFF.bin";
+        let bytes = render(std::iter::once(path));
         // Structure is intact and the invalid byte survived verbatim.
         assert!(bytes.starts_with(b".\n"));
-        assert!(bytes.windows(1).any(|w| w == [0xFF]));
+        assert!(bytes.contains(&0xFF));
     }
 
     #[test]
     fn t8_component_with_space() {
-        assert_eq!(render_strs(&["my dir/file.txt"]), ".\n└── my dir\n    └── file.txt\n");
+        assert_eq!(
+            render_strs(&["my dir/file.txt"]),
+            ".\n└── my dir\n    └── file.txt\n"
+        );
     }
 }

@@ -5,10 +5,11 @@ specification). The spec is the source of truth for **what** to build; this docu
 is the source of truth for **how and in what order** to build it. Section references
 (§) point back to the spec.
 
-Status: **M5 done** (internal ASCII tree renderer; `--tree` wired; exact §10.4 golden + out-of-order + non-UTF-8 cases; 132 tests green). Next up: M6 (hardening: leading-dash, non-UTF8/newline paths, exit-code audit).
-print0 output, scope/match flag propagation; 26 black-box e2e tests incl. scope
-consistency, empty-candidate short-circuit, ARG_MAX batching, rg-not-found; 123 tests
-green). Next up: M5 (tree renderer + `--tree`).
+Status: **v1 complete** (M1–M6 done). Lexer, parser, NNF/DNF, rg-backed engine, tree
+renderer, `--explain`/`--print0`, and the hardening pass are all implemented. **139 tests
+green** (unit + proptest + golden + black-box e2e); `cargo clippy -D warnings` and
+`cargo fmt --check` clean. All §15 acceptance criteria met. Remaining work is the optional
+M7 (parallel clauses, most-selective-first; native-search and line-level backends).
 
 ---
 

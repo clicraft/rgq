@@ -86,7 +86,7 @@ fn to_dnf(nnf: &Ast, max_clauses: usize) -> Result<Vec<Vec<Literal>>, NormalizeE
             let left = to_dnf(a, max_clauses)?;
             let right = to_dnf(b, max_clauses)?;
             // Distribute: (l1 OR l2) AND (r1 OR r2) -> l1r1 OR l1r2 OR l2r1 OR l2r2.
-            let product = left.len().checked_mul(right.len()).unwrap_or(usize::MAX);
+            let product = left.len().saturating_mul(right.len());
             guard(product, max_clauses)?;
             let mut out = Vec::with_capacity(product);
             for l in &left {
@@ -173,7 +173,10 @@ mod tests {
     #[test]
     fn n1_de_morgan_over_and() {
         // NOT (a AND b) -> NOT a OR NOT b -> two single-literal clauses.
-        assert_eq!(clauses("NOT (a AND b)"), vec![clause(&[neg("a")]), clause(&[neg("b")])]);
+        assert_eq!(
+            clauses("NOT (a AND b)"),
+            vec![clause(&[neg("a")]), clause(&[neg("b")])]
+        );
     }
 
     #[test]
@@ -195,7 +198,10 @@ mod tests {
     #[test]
     fn n6_nested_de_morgan_and_double_neg() {
         // NOT (a AND NOT b) -> NOT a OR b; clauses are sorted, so {NOT a} < {b}.
-        assert_eq!(clauses("NOT (a AND NOT b)"), vec![clause(&[neg("a")]), clause(&[pos("b")])]);
+        assert_eq!(
+            clauses("NOT (a AND NOT b)"),
+            vec![clause(&[neg("a")]), clause(&[pos("b")])]
+        );
     }
 
     // ---- DNF distribution + counts ----
@@ -231,13 +237,19 @@ mod tests {
 
     #[test]
     fn d6_contradiction_is_unsatisfiable() {
-        assert_eq!(normalize(&ast("a AND NOT a"), usize::MAX).unwrap(), Normalized::Unsatisfiable);
+        assert_eq!(
+            normalize(&ast("a AND NOT a"), usize::MAX).unwrap(),
+            Normalized::Unsatisfiable
+        );
     }
 
     #[test]
     fn d7_tautology_is_not_a_contradiction() {
         // a OR NOT a -> two clauses, both kept (neither is self-contradictory).
-        assert_eq!(clauses("a OR NOT a"), vec![clause(&[pos("a")]), clause(&[neg("a")])]);
+        assert_eq!(
+            clauses("a OR NOT a"),
+            vec![clause(&[pos("a")]), clause(&[neg("a")])]
+        );
     }
 
     #[test]

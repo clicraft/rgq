@@ -45,7 +45,11 @@ pub fn parse(tokens: &[Token]) -> Result<Ast, ParseError> {
     if tokens.is_empty() {
         return Err(ParseError::Empty);
     }
-    let mut p = Parser { tokens, pos: 0, depth: 0 };
+    let mut p = Parser {
+        tokens,
+        pos: 0,
+        depth: 0,
+    };
     let ast = p.or_expr()?;
     if p.pos != tokens.len() {
         return Err(ParseError::TrailingInput(describe(p.peek())));
@@ -270,7 +274,11 @@ mod tests {
 
     #[test]
     fn p16_too_deeply_nested_errors_cleanly() {
-        let deep = format!("{}a{}", "(".repeat(MAX_DEPTH + 5), ")".repeat(MAX_DEPTH + 5));
+        let deep = format!(
+            "{}a{}",
+            "(".repeat(MAX_DEPTH + 5),
+            ")".repeat(MAX_DEPTH + 5)
+        );
         assert!(matches!(err(&deep), ParseError::TooDeep(_)));
     }
 

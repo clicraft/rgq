@@ -31,7 +31,9 @@ pub enum Token {
 pub enum LexError {
     #[error("unterminated quoted string: no closing {0} found")]
     UnterminatedQuote(char),
-    #[error("empty term: an empty search string would match every file — remove it, or quote real text")]
+    #[error(
+        "empty term: an empty search string would match every file — remove it, or quote real text"
+    )]
     EmptyTerm,
 }
 
@@ -122,23 +124,35 @@ mod tests {
 
     #[test]
     fn l1_barewords_and_keyword() {
-        assert_eq!(lexed("cat AND dog"), vec![term("cat"), Token::And, term("dog")]);
+        assert_eq!(
+            lexed("cat AND dog"),
+            vec![term("cat"), Token::And, term("dog")]
+        );
     }
 
     #[test]
     fn l2_keywords_are_case_insensitive() {
-        assert_eq!(lexed("and And AND"), vec![Token::And, Token::And, Token::And]);
+        assert_eq!(
+            lexed("and And AND"),
+            vec![Token::And, Token::And, Token::And]
+        );
         assert_eq!(lexed("not OR nOt"), vec![Token::Not, Token::Or, Token::Not]);
     }
 
     #[test]
     fn l3_keyword_match_must_be_exact_word() {
-        assert_eq!(lexed("andy ANDES nottingham"), vec![term("andy"), term("ANDES"), term("nottingham")]);
+        assert_eq!(
+            lexed("andy ANDES nottingham"),
+            vec![term("andy"), term("ANDES"), term("nottingham")]
+        );
     }
 
     #[test]
     fn l4_quoted_keyword_is_a_term() {
-        assert_eq!(lexed("\"AND\" OR cat"), vec![term("AND"), Token::Or, term("cat")]);
+        assert_eq!(
+            lexed("\"AND\" OR cat"),
+            vec![term("AND"), Token::Or, term("cat")]
+        );
         assert_eq!(lexed("'NOT' cat"), vec![term("NOT"), term("cat")]);
     }
 
@@ -149,14 +163,23 @@ mod tests {
 
     #[test]
     fn l6_parens_tokenize() {
-        assert_eq!(lexed("(cat)"), vec![Token::LParen, term("cat"), Token::RParen]);
+        assert_eq!(
+            lexed("(cat)"),
+            vec![Token::LParen, term("cat"), Token::RParen]
+        );
     }
 
     #[test]
     fn l7_parens_break_barewords_without_whitespace() {
         assert_eq!(
             lexed("cat)AND(dog"),
-            vec![term("cat"), Token::RParen, Token::And, Token::LParen, term("dog")]
+            vec![
+                term("cat"),
+                Token::RParen,
+                Token::And,
+                Token::LParen,
+                term("dog")
+            ]
         );
     }
 

@@ -87,7 +87,10 @@ fn and() {
 
 #[test]
 fn or() {
-    assert_query(&["cat OR bird"], &["a.txt", "b.txt", "d.txt", "e.txt", "sub/f.txt"]);
+    assert_query(
+        &["cat OR bird"],
+        &["a.txt", "b.txt", "d.txt", "e.txt", "sub/f.txt"],
+    );
 }
 
 #[test]
@@ -97,17 +100,28 @@ fn and_not() {
 
 #[test]
 fn not_single_term() {
-    assert_query(&["NOT cat"], &["c.txt", "d.txt", "e.txt", "sub/g.md", "pkg/h.py", "pkg/i.py"]);
+    assert_query(
+        &["NOT cat"],
+        &[
+            "c.txt", "d.txt", "e.txt", "sub/g.md", "pkg/h.py", "pkg/i.py",
+        ],
+    );
 }
 
 #[test]
 fn nested_or_of_and() {
-    assert_query(&["(cat AND dog) OR bird"], &["a.txt", "d.txt", "e.txt", "sub/f.txt"]);
+    assert_query(
+        &["(cat AND dog) OR bird"],
+        &["a.txt", "d.txt", "e.txt", "sub/f.txt"],
+    );
 }
 
 #[test]
 fn not_of_disjunction() {
-    assert_query(&["NOT (cat OR dog)"], &["d.txt", "e.txt", "sub/g.md", "pkg/h.py", "pkg/i.py"]);
+    assert_query(
+        &["NOT (cat OR dog)"],
+        &["d.txt", "e.txt", "sub/g.md", "pkg/h.py", "pkg/i.py"],
+    );
 }
 
 #[test]
@@ -125,17 +139,26 @@ fn quoted_keyword_is_a_literal_term() {
 
 #[test]
 fn scope_hidden() {
-    assert_query(&["--hidden", "cat"], &["a.txt", "b.txt", "sub/f.txt", ".secret.txt"]);
+    assert_query(
+        &["--hidden", "cat"],
+        &["a.txt", "b.txt", "sub/f.txt", ".secret.txt"],
+    );
 }
 
 #[test]
 fn scope_no_ignore() {
-    assert_query(&["-u", "cat"], &["a.txt", "b.txt", "sub/f.txt", "build.log"]);
+    assert_query(
+        &["-u", "cat"],
+        &["a.txt", "b.txt", "sub/f.txt", "build.log"],
+    );
 }
 
 #[test]
 fn scope_no_ignore_and_hidden() {
-    assert_query(&["-uu", "cat"], &["a.txt", "b.txt", "sub/f.txt", "build.log", ".secret.txt"]);
+    assert_query(
+        &["-uu", "cat"],
+        &["a.txt", "b.txt", "sub/f.txt", "build.log", ".secret.txt"],
+    );
 }
 
 #[test]
@@ -159,7 +182,10 @@ fn scope_type_with_not() {
     // dotfiles, so .secret.txt is in the universe; NOT bird = U \ bird-files keeps
     // it. rgq mirrors rg's universe exactly (spec §7), which the
     // `not_is_universe_minus_matches` test independently confirms.
-    assert_query(&["-t", "txt", "NOT bird"], &[".secret.txt", "a.txt", "b.txt", "c.txt"]);
+    assert_query(
+        &["-t", "txt", "NOT bird"],
+        &[".secret.txt", "a.txt", "b.txt", "c.txt"],
+    );
 }
 
 /// Scope consistency (spec §7): `NOT t` must equal `U \ ⟦t⟧` under the same scope.
@@ -171,7 +197,10 @@ fn not_is_universe_minus_matches() {
     let cat = set(&run_in(dir.path(), &["cat"]));
     let not_cat = set(&run_in(dir.path(), &["NOT cat"]));
 
-    assert!(cat.is_disjoint(&not_cat), "a term and its negation must be disjoint");
+    assert!(
+        cat.is_disjoint(&not_cat),
+        "a term and its negation must be disjoint"
+    );
     let reunited: BTreeSet<String> = cat.union(&not_cat).cloned().collect();
     assert_eq!(reunited, universe, "⟦t⟧ ∪ ⟦NOT t⟧ must reconstitute U");
 }
@@ -221,7 +250,10 @@ fn positive_free_clause_warns_on_stderr() {
     let out = run_in(dir.path(), &["NOT cat"]);
     assert!(out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("no positive term"), "expected positive-free warning; got: {stderr}");
+    assert!(
+        stderr.contains("no positive term"),
+        "expected positive-free warning; got: {stderr}"
+    );
 }
 
 // ---- edge cases (TEST_PLAN §4) ----
@@ -233,7 +265,11 @@ fn empty_candidate_short_circuits_to_nothing() {
     let dir = fixture();
     let out = run_in(dir.path(), &["nonexistentxyz AND cat"]);
     assert_eq!(out.status.code(), Some(0));
-    assert!(out.stdout.is_empty(), "must be empty, got: {:?}", String::from_utf8_lossy(&out.stdout));
+    assert!(
+        out.stdout.is_empty(),
+        "must be empty, got: {:?}",
+        String::from_utf8_lossy(&out.stdout)
+    );
 }
 
 /// E.g. `rg` missing: pointing RGQ_RG at a non-existent binary surfaces a clear
@@ -249,7 +285,10 @@ fn missing_rg_is_a_clear_error() {
         .expect("spawn rgq");
     assert_ne!(out.status.code(), Some(0));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("ripgrep"), "expected an rg error; got: {stderr}");
+    assert!(
+        stderr.contains("ripgrep"),
+        "expected an rg error; got: {stderr}"
+    );
 }
 
 /// ARG_MAX batching (spec §8.2): force a tiny budget and confirm the result is
@@ -279,7 +318,11 @@ fn arg_max_batching_is_correct() {
     assert!(unbatched.status.success() && batched.status.success());
     let expected: BTreeSet<String> = (0..60).map(|i| format!("m{i:02}.txt")).collect();
     assert_eq!(set(&unbatched), expected);
-    assert_eq!(set(&batched), expected, "batched result must match unbatched");
+    assert_eq!(
+        set(&batched),
+        expected,
+        "batched result must match unbatched"
+    );
 }
 
 /// Regex-by-default vs `-F` fixed strings (spec §3.2): `a.c` is a regex that

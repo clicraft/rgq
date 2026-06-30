@@ -14,10 +14,11 @@ set logic (intersection, union, difference) in Rust over byte-string path sets â
 are correct for paths that aren't valid UTF-8, and for arbitrarily nested queries (not just
 the shapes that happened to be tested).
 
-> **Status: early development.** The CLI front end (argument parsing and the match-vs-scope
-> flag classification) is in place. Query lexing/parsing/normalization and the search engine
-> are being built milestone by milestone â€” see [`PLAN.md`](./PLAN.md). The full specification
-> is [`desing_v0.1.0.md`](./desing_v0.1.0.md).
+> **Status: v1 feature-complete.** Lexer, parser, NNF/DNF normalization, the rg-backed
+> engine, the tree renderer, and `--explain`/`--print0` are all implemented and tested
+> (unit + property + golden + black-box e2e). See [`PLAN.md`](./PLAN.md) for the build
+> log, [`TEST_PLAN.md`](./TEST_PLAN.md) for the test design, and
+> [`desing_v0.1.0.md`](./desing_v0.1.0.md) for the full specification.
 
 ## Query language
 

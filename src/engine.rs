@@ -39,7 +39,11 @@ pub fn run(clauses: &ClauseList, rg: &Rg) -> Result<Outcome, RgError> {
 /// Evaluate one clause by progressive narrowing (spec §8.1). Whether a literal is
 /// positive or negative — not its position — decides how it is applied, which is
 /// why `NOT a AND b` works: `b` seeds, `a` filters.
-fn eval_clause(clause: &Clause, rg: &Rg, warnings: &mut Vec<String>) -> Result<Vec<Vec<u8>>, RgError> {
+fn eval_clause(
+    clause: &Clause,
+    rg: &Rg,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<Vec<u8>>, RgError> {
     let positives: Vec<&[u8]> = clause
         .literals
         .iter()

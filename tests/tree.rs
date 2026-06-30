@@ -31,7 +31,12 @@ const GOLDEN: &str = "\
 fn tree_output_matches_spec_10_4() {
     let dir = TempDir::new().unwrap();
     // Every file contains the term `needle`, so `rgq --tree needle` selects them all.
-    for rel in ["README.md", "src/a/main.py", "src/a/util.py", "src/b/test.py"] {
+    for rel in [
+        "README.md",
+        "src/a/main.py",
+        "src/a/util.py",
+        "src/b/test.py",
+    ] {
         write(dir.path(), rel, "needle\n");
     }
 
@@ -41,6 +46,10 @@ fn tree_output_matches_spec_10_4() {
         .output()
         .expect("spawn rgq");
 
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&out.stdout), GOLDEN);
 }

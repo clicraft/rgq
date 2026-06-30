@@ -53,7 +53,12 @@ pub struct Cli {
     explain: bool,
 
     /// Emit NUL-separated paths (for `xargs -0`). Conflicts with --tree.
-    #[arg(long = "print0", short = '0', conflicts_with = "tree", help_heading = "Output")]
+    #[arg(
+        long = "print0",
+        short = '0',
+        conflicts_with = "tree",
+        help_heading = "Output"
+    )]
     print0: bool,
 
     // ---- match flags: how a term is matched (apply to every search) ----
@@ -93,7 +98,12 @@ pub struct Cli {
     // ---- limits ----
     /// Maximum number of clauses a query may expand to in normal form. Guards
     /// against the combinatorial blow-up of disjunctive normal form.
-    #[arg(long = "max-clauses", value_name = "N", default_value_t = 1024, help_heading = "Limits")]
+    #[arg(
+        long = "max-clauses",
+        value_name = "N",
+        default_value_t = 1024,
+        help_heading = "Limits"
+    )]
     max_clauses: usize,
 
     // ---- the query ----
@@ -391,7 +401,10 @@ mod tests {
     #[test]
     fn types_and_globs_accumulate_in_order() {
         let c = cfg(&["-t", "py", "-t", "md", "-g", "*.rs", "cat"]).unwrap();
-        assert_eq!(c.scope_flags.types, vec!["py".to_string(), "md".to_string()]);
+        assert_eq!(
+            c.scope_flags.types,
+            vec!["py".to_string(), "md".to_string()]
+        );
         assert_eq!(c.scope_flags.globs, vec!["*.rs".to_string()]);
     }
 
@@ -407,7 +420,10 @@ mod tests {
 
     #[test]
     fn output_mode_print0_long_and_short() {
-        assert_eq!(cfg(&["--print0", "cat"]).unwrap().output, OutputMode::Print0);
+        assert_eq!(
+            cfg(&["--print0", "cat"]).unwrap().output,
+            OutputMode::Print0
+        );
         assert_eq!(cfg(&["-0", "cat"]).unwrap().output, OutputMode::Print0);
     }
 
@@ -425,7 +441,10 @@ mod tests {
 
     #[test]
     fn single_quoted_query_passes_through() {
-        assert_eq!(cfg(&["(cat OR dog) AND NOT bird"]).unwrap().query, "(cat OR dog) AND NOT bird");
+        assert_eq!(
+            cfg(&["(cat OR dog) AND NOT bird"]).unwrap().query,
+            "(cat OR dog) AND NOT bird"
+        );
     }
 
     #[test]

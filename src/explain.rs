@@ -66,7 +66,10 @@ pub fn explain(parsed: &crate::ast::Ast, normalized: &Normalized) -> String {
             }
         }
         for term in &negatives {
-            out.push_str(&format!("    narrow to files NOT matching: {}\n", render_term(term)));
+            out.push_str(&format!(
+                "    narrow to files NOT matching: {}\n",
+                render_term(term)
+            ));
         }
     }
     out.push_str("  union the per-clause results\n");

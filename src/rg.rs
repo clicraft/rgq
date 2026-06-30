@@ -125,7 +125,11 @@ impl Rg {
     }
 
     /// Spawn with explicit candidate paths after a `--` end-of-options marker.
-    fn spawn_with_paths(&self, base: &[OsString], paths: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, RgError> {
+    fn spawn_with_paths(
+        &self,
+        base: &[OsString],
+        paths: &[Vec<u8>],
+    ) -> Result<Vec<Vec<u8>>, RgError> {
         let mut args = base.to_vec();
         args.push(OsString::from("--"));
         for p in paths {
@@ -148,7 +152,9 @@ impl Rg {
             Some(0) | Some(1) => Ok(parse_nul(&output.stdout)),
             other => Err(RgError::Failed {
                 code: other,
-                stderr: String::from_utf8_lossy(&output.stderr).trim_end().to_string(),
+                stderr: String::from_utf8_lossy(&output.stderr)
+                    .trim_end()
+                    .to_string(),
             }),
         }
     }
@@ -263,7 +269,7 @@ mod tests {
     fn b3_single_oversized_path_is_its_own_batch() {
         let paths = vec![v("x"), v("this_one_is_huge"), v("y")];
         let b = batches(&paths, 4); // most paths exceed 4 alone
-        // every path ends up in some batch, no batch is empty
+                                    // every path ends up in some batch, no batch is empty
         assert!(b.iter().all(|batch| !batch.is_empty()));
         let flat: Vec<&Vec<u8>> = b.iter().flat_map(|s| s.iter()).collect();
         assert_eq!(flat, vec![&paths[0], &paths[1], &paths[2]]);
@@ -294,7 +300,10 @@ mod tests {
         };
         assert_eq!(
             match_args(&m),
-            vec![OsString::from("--ignore-case"), OsString::from("--word-regexp")]
+            vec![
+                OsString::from("--ignore-case"),
+                OsString::from("--word-regexp")
+            ]
         );
     }
 

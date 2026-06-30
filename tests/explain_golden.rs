@@ -19,7 +19,12 @@ macro_rules! golden {
     ($name:ident, $query:expr, $file:expr) => {
         #[test]
         fn $name() {
-            assert_eq!(explain($query), include_str!($file), "mismatch for query {:?}", $query);
+            assert_eq!(
+                explain($query),
+                include_str!($file),
+                "mismatch for query {:?}",
+                $query
+            );
         }
     };
 }
@@ -29,14 +34,34 @@ golden!(
     "(cat AND dog) OR bird",
     "golden/explain_cat_and_dog_or_bird.txt"
 );
-golden!(not_cat_or_dog, "NOT (cat OR dog)", "golden/explain_not_cat_or_dog.txt");
-golden!(not_cage_and_bird, "NOT cage AND bird", "golden/explain_not_cage_and_bird.txt");
+golden!(
+    not_cat_or_dog,
+    "NOT (cat OR dog)",
+    "golden/explain_not_cat_or_dog.txt"
+);
+golden!(
+    not_cage_and_bird,
+    "NOT cage AND bird",
+    "golden/explain_not_cage_and_bird.txt"
+);
 golden!(not_not_cat, "NOT NOT cat", "golden/explain_not_not_cat.txt");
 golden!(
     cat_and_dog_or_bird_precedence,
     "cat AND dog OR bird",
     "golden/explain_cat_and_dog_or_bird_precedence.txt"
 );
-golden!(unsatisfiable, "cat AND NOT cat", "golden/explain_unsatisfiable.txt");
-golden!(aorb_and_corc, "(a OR b) AND (c OR d)", "golden/explain_aorb_and_corc.txt");
-golden!(quoted_and_or_cat, "\"AND\" OR cat", "golden/explain_quoted_and_or_cat.txt");
+golden!(
+    unsatisfiable,
+    "cat AND NOT cat",
+    "golden/explain_unsatisfiable.txt"
+);
+golden!(
+    aorb_and_corc,
+    "(a OR b) AND (c OR d)",
+    "golden/explain_aorb_and_corc.txt"
+);
+golden!(
+    quoted_and_or_cat,
+    "\"AND\" OR cat",
+    "golden/explain_quoted_and_or_cat.txt"
+);
