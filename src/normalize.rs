@@ -88,7 +88,11 @@ fn to_dnf(nnf: &Ast, max_clauses: usize) -> Result<Vec<Vec<Literal>>, NormalizeE
             // Distribute: (l1 OR l2) AND (r1 OR r2) -> l1r1 OR l1r2 OR l2r1 OR l2r2.
             let product = left.len().saturating_mul(right.len());
             guard(product, max_clauses)?;
-            let mut out = Vec::with_capacity(product);
+            // Clamp the pre-allocation hint: `product` is bounded by `max_clauses`,
+            // which the user can raise arbitrarily, so cap the *capacity hint* (not
+            // the result) to avoid a huge speculative allocation. Correctness is
+            // unaffected — the Vec grows as needed.
+            let mut out = Vec::with_capacity(product.min(4096));
             for l in &left {
                 for r in &right {
                     let mut clause = l.clone();

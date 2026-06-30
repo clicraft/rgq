@@ -14,7 +14,7 @@
 //! modelled in the type system rather than passed around as a loose bag of bools.
 
 use std::collections::BTreeSet;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 
 use clap::{ArgAction, Parser};
@@ -318,35 +318,99 @@ fn dispatch(config: &Config) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Write the final path set in the requested output mode (spec §9). Paths are
-/// written as raw bytes (byte-oriented, spec §2.2); `--print0` is the form that is
-/// also correct for paths containing newlines.
+/// Write the final path set in the requested output mode (spec §9).
+///
+/// Paths come from whatever tree the user pointed `rgq` at, so a filename is
+/// attacker-influenceable. To stop a crafted name from injecting terminal escape
+/// sequences (recolour, clear-line, cursor moves — output spoofing), control bytes
+/// are escaped in the **human-facing** modes (`List`, `Tree`) **when stdout is a
+/// terminal**. Piped/redirected output stays raw so tooling gets exact bytes, and
+/// `--print0` is always raw — it is the correct, unambiguous form for machine
+/// consumption and for paths containing newlines (spec §2.2, §9).
 fn emit(files: &BTreeSet<Vec<u8>>, mode: OutputMode) -> io::Result<()> {
     let stdout = io::stdout();
+    let escape = stdout.is_terminal();
     let mut out = stdout.lock();
     match mode {
         OutputMode::List => {
             for path in files {
-                out.write_all(path)?;
+                out.write_all(&display_path(path, escape))?;
                 out.write_all(b"\n")?;
             }
         }
         OutputMode::Print0 => {
+            // Raw, NUL-delimited: exact bytes, no escaping. A filename cannot
+            // contain NUL, so the framing is unambiguous.
             for path in files {
                 out.write_all(path)?;
                 out.write_all(b"\0")?;
             }
         }
         OutputMode::Tree => {
-            out.write_all(&tree::render(files.iter().map(Vec::as_slice)))?;
+            if escape {
+                let safe: Vec<Vec<u8>> = files.iter().map(|p| sanitize_controls(p)).collect();
+                out.write_all(&tree::render(safe.iter().map(Vec::as_slice)))?;
+            } else {
+                out.write_all(&tree::render(files.iter().map(Vec::as_slice)))?;
+            }
         }
     }
     out.flush()
 }
 
+/// A path rendered for human display: control bytes escaped when `escape` is set,
+/// otherwise the raw bytes.
+fn display_path(path: &[u8], escape: bool) -> Vec<u8> {
+    if escape {
+        sanitize_controls(path)
+    } else {
+        path.to_vec()
+    }
+}
+
+/// Replace C0 control bytes (`0x00`–`0x1f`, including ESC and newline/CR) and DEL
+/// (`0x7f`) with a visible `\xHH` form, so they cannot drive the terminal. Bytes
+/// `>= 0x80` (UTF-8 lead/continuation, or invalid bytes) are passed through so
+/// legitimate non-ASCII filenames still display.
+fn sanitize_controls(path: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(path.len());
+    for &b in path {
+        if b < 0x20 || b == 0x7f {
+            out.extend_from_slice(format!("\\x{b:02x}").as_bytes());
+        } else {
+            out.push(b);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitize_neutralizes_terminal_escapes() {
+        // An ANSI colour + clear-line + CR injected via a filename.
+        let evil = b"evil\x1b[31m\x1b[2K\rsafe.txt";
+        let safe = sanitize_controls(evil);
+        // No raw ESC / CR survive; they become visible \xHH.
+        assert!(!safe.contains(&0x1b), "ESC must be escaped");
+        assert!(!safe.contains(&b'\r'), "CR must be escaped");
+        assert_eq!(safe, b"evil\\x1b[31m\\x1b[2K\\x0dsafe.txt");
+    }
+
+    #[test]
+    fn sanitize_passes_through_printable_and_high_bytes() {
+        // Printable ASCII and UTF-8 / high bytes are preserved verbatim.
+        let name = "café/path-1.txt".as_bytes();
+        assert_eq!(sanitize_controls(name), name);
+        assert_eq!(sanitize_controls(&[0xFF, 0xFE]), vec![0xFF, 0xFE]);
+    }
+
+    #[test]
+    fn sanitize_escapes_newline_and_tab_and_del() {
+        assert_eq!(sanitize_controls(b"a\nb\tc\x7f"), b"a\\x0ab\\x09c\\x7f");
+    }
 
     /// Parse args (with the implicit `rgq` argv[0]) and classify, asserting the
     /// parse itself succeeds.

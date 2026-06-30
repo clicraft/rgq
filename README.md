@@ -38,6 +38,7 @@ shapes that happened to be tested).
 - [Exit codes](#exit-codes)
 - [Environment variables](#environment-variables)
 - [Gotchas & notes](#gotchas--notes)
+- [Security](#security)
 - [Build & test](#build--test)
 - [License](#license)
 
@@ -290,6 +291,19 @@ go to **stderr** and do not change the exit code.
   `--print0` when paths might contain newlines.
 
 ---
+
+## Security
+
+`rgq` is safe Rust (no `unsafe`) and never invokes a shell — `rg` is spawned with a structured
+argument vector, search patterns go after `-e`, and paths after `--`, so neither a query term
+nor a filename can be misread as a flag. Filenames are attacker-influenceable, so control bytes
+in paths are **escaped when output goes to a terminal** (preventing ANSI escape-sequence
+spoofing); piped output stays raw and `--print0` is the safe form for machine consumption.
+
+If you **embed** `rgq` and pass an untrusted query, always separate it with `--`
+(`rgq -- "$query"`) so the query can't smuggle `rgq`'s own flags (e.g. `-uu` to widen scope).
+
+The full threat model, findings, and mitigations are in [`SECURITY.md`](./SECURITY.md).
 
 ## Build & test
 

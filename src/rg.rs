@@ -150,6 +150,22 @@ impl Rg {
         match output.status.code() {
             // 0 = matches, 1 = no matches; both ran fine. Use stdout, not the code.
             Some(0) | Some(1) => Ok(parse_nul(&output.stdout)),
+            // Exit 2 *with* output: ripgrep hit a non-fatal I/O error (a file
+            // vanished or was unreadable) but still produced results. Surface a
+            // warning and use what it found rather than failing the whole query —
+            // this also defuses a race where files are deleted between the listing
+            // and the narrowing pass. A truly fatal error (bad regex, bad flag)
+            // produces empty stdout and falls through to the error arm below.
+            Some(2) if !output.stdout.is_empty() => {
+                if let Some(line) = String::from_utf8_lossy(&output.stderr)
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty())
+                {
+                    eprintln!("rgq: warning: ripgrep: {line}");
+                }
+                Ok(parse_nul(&output.stdout))
+            }
             other => Err(RgError::Failed {
                 code: other,
                 stderr: String::from_utf8_lossy(&output.stderr)
