@@ -32,6 +32,7 @@ EXAMPLES:
     rgq -i -t py 'import AND NOT __future__'
     rgq -n '(A AND B) OR C'              # show the compiled plan, run nothing
     rgq -0 'error AND NOT timeout' | xargs -0 wc -l
+    rgq '\"AND\" OR \"NOT\"'             # quote a keyword to search for it literally
 
 Quote the whole query when it contains parentheses or NOT, otherwise the shell will
 interpret them. A query that begins with '-' must be separated with '--', e.g.

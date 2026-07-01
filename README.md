@@ -78,6 +78,7 @@ rgq -i -t py 'import AND NOT __future__'  # case-insensitive, Python files only
 rgq '(a AND b) OR c' --tree               # render the result as a tree
 rgq -n '(A AND B) OR C'                   # show the compiled plan, run nothing
 rgq -0 'error AND NOT timeout' | xargs -0 wc -l   # pipe NUL-safe paths onward
+rgq '"AND" OR "NOT"'                      # quote a keyword to search for it literally
 ```
 
 The query is one argument — **quote it** so the shell doesn't interpret the parentheses or the
@@ -104,9 +105,11 @@ terms with no operator between them (`cat dog`) is a *parse error*, not a silent
 
 - A **bareword** runs up to the next whitespace or parenthesis: `cat`, `__future__`, `a.*b`.
 - Operators are matched **case-insensitively** — `and`, `And`, `AND` are all the operator.
-- A **quoted string** (single or double) is **always** a term, never an operator. This is how
-  you search for the literal word *and*: `rgq '"AND" OR cat'`. Whitespace inside quotes is kept
-  (`'cat dog'` is one term that matches the phrase).
+- A **quoted string** (single or double) is **always** a term, never an operator — this is how
+  you search for the literal words `and`, `or`, `not`: `rgq '"AND"'`, `rgq '"OR"'`, `rgq '"NOT"'`.
+  Quoting works the same whether the keyword stands alone or sits next to real operators, e.g.
+  `rgq '"AND" OR cat'` (literal "AND", or "cat") or `rgq '"OR" OR "NOT"'` (either literal word).
+  Whitespace inside quotes is kept (`'cat dog'` is one term that matches the phrase).
 - Terms are **regexes by default** (ripgrep compiles them). `a.c` matches `abc`; to match the
   literal three characters `a.c`, pass `-F` (fixed strings). A term that is an invalid regex
   (e.g. an unbalanced `'('`) surfaces ripgrep's error.
@@ -281,6 +284,9 @@ go to **stderr** and do not change the exit code.
 
 - **Quote your query.** Parentheses and `NOT` are shell metacharacters/words; `rgq '(a OR b)'`,
   not `rgq (a OR b)`.
+- **Want to search for the word `AND`, `OR`, or `NOT` itself?** Quote it: `rgq '"AND"'`. An
+  *unquoted* `AND`/`OR`/`NOT` (any case) is always the operator; a *quoted* one is always a
+  literal term — see [Query language](#query-language).
 - **A query that starts with `-`** looks like a flag to the argument parser. Separate it with
   `--`: `rgq -- '-x OR foo'`. (A term *inside* the query that starts with `-` is fine once the
   whole query is past `--` or quoted away from the leading dash.)
